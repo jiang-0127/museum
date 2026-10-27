@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.museum.reservation.module.reservation.mapper.ReservationMapper">
+
+    <sql id="reservationColumns">
+        r.id, r.order_no, r.user_id, r.museum_id, m.name AS museum_name,
+        r.exhibition_id, e.name AS exhibition_name, r.slot_id,
+        s.visit_date, s.start_time, s.end_time,
+        r.ticket_type_id,
+        CONCAT(t.name,
+               CASE t.audience_type
+                   WHEN 'ADULT' THEN ' · 成人票'
+                   WHEN 'STUDENT' THEN ' · 学生票'
+                   WHEN 'FAMILY' THEN ' · 亲子票'
+                   ELSE ''
+               END) AS ticket_type_name,
+        r.visitor_count, r.unit_price, r.total_amount,
+        r.contact_name, r.contact_phone, r.status,
+        p.payment_no, p.status AS payment_status,
+        r.qr_expire_at, r.cancel_time, r.checkin_time, r.created_at
+    </sql>
+
+    <sql id="reservationJoins">
+        FROM reservation r
+        LEFT JOIN museum m ON m.id = r.museum_id
+        LEFT JOIN exhibition e ON e.id = r.exhibition_id
+        LEFT JOIN visit_slot s ON s.id = r.slot_id
+        LEFT JOIN ticket_type t ON t.id = r.ticket_type_id
+        LEFT JOIN payment_order p ON p.reservation_id = r.id
+    </sql>
+
+    <select id="selectVoPage" resultType="com.museum.reservation.module.reservation.vo.ReservationVO">
+        SELECT <include refid="reservationColumns"/>
+        <include refid="reservationJoins"/>
+        <where>
+            <if test="query.userId != null">AND r.user_id = #{query.userId}</if>
+            <if test="query.museumId != null">AND r.museum_id = #{query.museumId}</if>
+            <if test="query.status != null and query.status != ''">AND r.status = #{query.status}</if>
+            <if test="query.keyword != null and query.keyword != ''">
+                AND (r.order_no LIKE CONCAT('%', #{query.keyword}, '%')
+                OR r.contact_name LIKE CONCAT('%', #{query.keyword}, '%')
+                OR r.contact_phone LIKE CONCAT('%', #{query.keyword}, '%'))
+            </if>
+            <if test="query.dateStart != null">AND s.visit_date &gt;= #{query.dateStart}</if>
+            <if test="query.dateEnd != null">AND s.visit_date &lt;= #{query.dateEnd}</if>
+        </where>
+        ORDER BY r.created_at DESC
+    </select>
+
+    <select id="selectVoById" resultType="com.museum.reservation.module.reservation.vo.ReservationVO">
+        SELECT <include refid="reservationColumns"/>
+        <include refid="reservationJoins"/>
+        WHERE r.id = #{id}
+    </select>
+
+</mapper>

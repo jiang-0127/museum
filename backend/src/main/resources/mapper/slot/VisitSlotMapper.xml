@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.museum.reservation.module.slot.mapper.VisitSlotMapper">
+
+    <sql id="slotColumns">
+        s.id, s.museum_id, m.name AS museum_name, s.exhibition_id, e.name AS exhibition_name,
+        s.visit_date, s.start_time, s.end_time, s.total_capacity, s.booked_count,
+        (s.total_capacity - s.booked_count) AS remaining, s.status, s.created_at
+    </sql>
+
+    <sql id="slotJoins">
+        FROM visit_slot s
+        LEFT JOIN museum m ON m.id = s.museum_id
+        LEFT JOIN exhibition e ON e.id = s.exhibition_id
+    </sql>
+
+    <select id="selectVoPage" resultType="com.museum.reservation.module.slot.vo.SlotVO">
+        SELECT <include refid="slotColumns"/>
+        <include refid="slotJoins"/>
+        <where>
+            <if test="museumId != null">AND s.museum_id = #{museumId}</if>
+            <if test="exhibitionId != null">AND s.exhibition_id = #{exhibitionId}</if>
+            <if test="date != null">AND s.visit_date = #{date}</if>
+            <if test="fromDate != null">AND s.visit_date &gt;= #{fromDate}</if>
+            <if test="status != null">AND s.status = #{status}</if>
+            <if test="!includePast">AND s.visit_date &gt;= CURDATE()</if>
+        </where>
+        ORDER BY s.visit_date ASC, s.start_time ASC
+    </select>
+
+    <select id="selectVoList" resultType="com.museum.reservation.module.slot.vo.SlotVO">
+        SELECT <include refid="slotColumns"/>
+        <include refid="slotJoins"/>
+        <where>
+            <if test="museumId != null">AND s.museum_id = #{museumId}</if>
+            <if test="exhibitionId != null">AND s.exhibition_id = #{exhibitionId}</if>
+            <if test="date != null">AND s.visit_date = #{date}</if>
+            <if test="fromDate != null">AND s.visit_date &gt;= #{fromDate}</if>
+            <if test="status != null">AND s.status = #{status}</if>
+            <if test="!includePast">AND s.visit_date &gt;= CURDATE()</if>
+        </where>
+        ORDER BY s.visit_date ASC, s.start_time ASC
+    </select>
+
+    <select id="selectVoById" resultType="com.museum.reservation.module.slot.vo.SlotVO">
+        SELECT <include refid="slotColumns"/>
+        <include refid="slotJoins"/>
+        WHERE s.id = #{id}
+    </select>
+
+</mapper>

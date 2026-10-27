@@ -1,0 +1,44 @@
+# ================= 前端（Vue + Vite） =================
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/dev.log
+frontend/*.log
+
+# ================= 后端（Spring Boot + Maven） =================
+backend/target/
+backend/*.log
+# 运行时上传的用户文件（FileController 会自动重建目录）
+backend/uploads/
+
+# ================= 日志与调试 =================
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ================= IDE / 编辑器 =================
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.project
+.classpath
+
+# ================= 系统 / 临时文件 =================
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+*.bak
+*.swp
+*~
+
+# ================= 环境变量（避免泄露账号密码） =================
+.env
+.env.*
+!.env.example
+*.local

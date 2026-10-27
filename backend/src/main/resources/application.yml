@@ -1,0 +1,78 @@
+server:
+  port: 8080
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: museum-reservation
+  profiles:
+    active: dev
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:museum_reservation}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:123456}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 10000
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+      timeout: 2s
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+    default-property-inclusion: non_null
+  servlet:
+    multipart:
+      max-file-size: 8MB
+      max-request-size: 12MB
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.museum.reservation.module
+  configuration:
+    map-underscore-to-camel-case: true
+    default-enum-type-handler: org.apache.ibatis.type.EnumOrdinalTypeHandler
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:museum-reservation-demo-secret-key-please-change-in-production-2026}
+    expire-hours: 24
+  qr:
+    secret: ${QR_SECRET:museum-ticket-qr-demo-secret-please-change-2026}
+  redis:
+    enabled: ${REDIS_ENABLED:false}
+  reservation:
+    payment-timeout-minutes: 15
+    max-visitors: 6
+  upload:
+    dir: ${UPLOAD_DIR:./uploads}
+    url-prefix: /uploads
+  cors:
+    allowed-origins: ${CORS_ORIGINS:http://localhost:[*],http://127.0.0.1:[*],http://localhost,http://127.0.0.1}
+
+logging:
+  level:
+    com.museum.reservation: info
