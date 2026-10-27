@@ -15,6 +15,8 @@ import com.museum.reservation.module.slot.dto.SlotSaveRequest;
 import com.museum.reservation.module.slot.entity.VisitSlot;
 import com.museum.reservation.module.slot.mapper.VisitSlotMapper;
 import com.museum.reservation.module.slot.vo.SlotVO;
+import com.museum.reservation.module.ticket.entity.TicketType;
+import com.museum.reservation.module.ticket.mapper.TicketTypeMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
@@ -24,7 +26,10 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -36,6 +41,7 @@ public class SlotService {
     private final MuseumMapper museumMapper;
     private final ExhibitionMapper exhibitionMapper;
     private final ReservationMapper reservationMapper;
+    private final TicketTypeMapper ticketTypeMapper;
     private final CacheService cacheService;
 
     public List<SlotVO> publicList(Long museumId, Long exhibitionId, LocalDate date, LocalDate fromDate) {
@@ -67,14 +73,24 @@ public class SlotService {
 
     public PageResult<SlotVO> adminPage(long page, long size, Long museumId, Long exhibitionId,
                                         LocalDate date, Integer status) {
+        slotMapper.closeElapsedSlots();
         Page<SlotVO> result = new Page<>(page, size);
         slotMapper.selectVoPage(result, museumId, exhibitionId, date, null, status, true);
+        enrichStats(result.getRecords());
         return new PageResult<>(result.getRecords(), result.getTotal(), result.getCurrent(), result.getSize());
+    }
+
+    @Transactional
+    public int closeElapsedSlots() {
+        return slotMapper.closeElapsedSlots();
     }
 
     @Transactional
     public SlotVO create(SlotSaveRequest request) {
         validateRequest(request);
+        if (!request.getVisitDate().atTime(request.getStartTime()).isAfter(LocalDateTime.now())) {
+            throw new BusinessException("该参观时段已开始或已结束，请选择未来的时间");
+        }
         Long duplicate = slotMapper.selectCount(new LambdaQueryWrapper<VisitSlot>()
                 .eq(VisitSlot::getMuseumId, request.getMuseumId())
                 .eq(request.getExhibitionId() != null, VisitSlot::getExhibitionId, request.getExhibitionId())
@@ -110,6 +126,9 @@ public class SlotService {
             throw new BusinessException("该时段已有预约，不能修改日期或时间");
         }
         BeanUtils.copyProperties(request, slot);
+        if (!slot.getVisitDate().atTime(slot.getStartTime()).isAfter(LocalDateTime.now())) {
+            slot.setStatus(Constants.STATUS_DISABLED);
+        }
         slotMapper.updateById(slot);
         evictAfterCommit(id);
         return getById(id);
@@ -146,6 +165,54 @@ public class SlotService {
         } else {
             evict(id);
         }
+    }
+
+    private void enrichStats(List<SlotVO> records) {
+        if (records.isEmpty()) {
+            return;
+        }
+        List<Long> museumIds = records.stream().map(SlotVO::getMuseumId).distinct().toList();
+        Map<Long, List<TicketType>> ticketsByMuseum = ticketTypeMapper.selectList(
+                        new LambdaQueryWrapper<TicketType>()
+                                .in(TicketType::getMuseumId, museumIds)
+                                .eq(TicketType::getStatus, Constants.STATUS_ENABLED)
+                                .orderByAsc(TicketType::getSort)
+                                .orderByAsc(TicketType::getId))
+                .stream()
+                .collect(Collectors.groupingBy(TicketType::getMuseumId));
+
+        List<Long> slotIds = records.stream().map(SlotVO::getId).toList();
+        Map<Long, List<Reservation>> reservationsBySlot = reservationMapper.selectList(
+                        new LambdaQueryWrapper<Reservation>()
+                                .in(Reservation::getSlotId, slotIds)
+                                .in(Reservation::getStatus,
+                                        Constants.RESERVATION_PENDING_PAYMENT,
+                                        Constants.RESERVATION_RESERVED,
+                                        Constants.RESERVATION_CHECKED_IN,
+                                        Constants.RESERVATION_EXPIRED))
+                .stream()
+                .collect(Collectors.groupingBy(Reservation::getSlotId));
+
+        for (SlotVO slot : records) {
+            List<TicketType> ticketTypes = ticketsByMuseum.getOrDefault(slot.getMuseumId(), List.of());
+            slot.setTicketTypeCount(ticketTypes.size());
+            slot.setTicketTypeNames(ticketTypes.stream().map(this::ticketLabel).toList());
+
+            List<Reservation> reservations = reservationsBySlot.getOrDefault(slot.getId(), List.of());
+            slot.setReservationOrderCount(reservations.size());
+            slot.setReservationVisitorCount(
+                    reservations.stream().mapToInt(Reservation::getVisitorCount).sum());
+        }
+    }
+
+    private String ticketLabel(TicketType ticket) {
+        String audience = switch (ticket.getAudienceType() == null ? "GENERAL" : ticket.getAudienceType()) {
+            case "ADULT" -> "成人票";
+            case "STUDENT" -> "学生票";
+            case "FAMILY" -> "亲子票";
+            default -> "";
+        };
+        return audience.isEmpty() ? ticket.getName() : ticket.getName() + " · " + audience;
     }
 
     private void validateRequest(SlotSaveRequest request) {

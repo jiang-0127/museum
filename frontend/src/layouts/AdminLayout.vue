@@ -88,7 +88,7 @@ function handleCommand(command: string) {
         </template>
       </div>
 
-      <div class="sidebar-footer">
+      <div v-if="!auth.isAdmin" class="sidebar-footer">
         <button class="back-site" @click="go('/')">
           <el-icon><Back /></el-icon>
           <span v-show="!collapsed">返回参观门户</span>
@@ -129,7 +129,7 @@ function handleCommand(command: string) {
             </button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="/">返回参观门户</el-dropdown-item>
+                <el-dropdown-item command="/admin/profile">个人资料</el-dropdown-item>
                 <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -179,6 +179,10 @@ function handleCommand(command: string) {
             {{ item.label }}
           </button>
         </template>
+        <button class="mobile-menu-item" @click="go('/admin/profile')">
+          <el-icon><User /></el-icon>
+          个人资料
+        </button>
       </div>
     </el-drawer>
   </div>

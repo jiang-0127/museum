@@ -5,6 +5,7 @@ import com.museum.reservation.module.statistics.service.StatisticsService;
 import com.museum.reservation.module.statistics.vo.NameValue;
 import com.museum.reservation.module.statistics.vo.OverviewVO;
 import com.museum.reservation.module.statistics.vo.SlotSaturationVO;
+import com.museum.reservation.module.statistics.vo.TicketDistributionVO;
 import com.museum.reservation.module.statistics.vo.TrendPoint;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -48,6 +49,12 @@ public class StatisticsController {
     @GetMapping("/ticket-distribution")
     public ApiResponse<List<NameValue>> ticketDistribution() {
         return ApiResponse.ok(statisticsService.ticketDistribution());
+    }
+
+    @Operation(summary = "票种分布（含各具体票种明细）")
+    @GetMapping("/ticket-distribution-detail")
+    public ApiResponse<List<TicketDistributionVO>> ticketDistributionDetail() {
+        return ApiResponse.ok(statisticsService.ticketDistributionDetail());
     }
 
     @Operation(summary = "时段饱和度")

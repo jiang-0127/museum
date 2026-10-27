@@ -139,10 +139,10 @@ const router = createRouter({
           meta: { title: '操作日志', roles: ['SYSTEM_ADMIN'] },
         },
         {
-          path: 'configs',
-          name: 'admin-configs',
-          component: () => import('@/views/admin/ConfigView.vue'),
-          meta: { title: '参数配置', roles: ['SYSTEM_ADMIN'] },
+          path: 'profile',
+          name: 'admin-profile',
+          component: () => import('@/views/admin/AdminProfileView.vue'),
+          meta: { title: '个人资料' },
         },
       ],
     },
@@ -177,6 +177,14 @@ router.beforeEach(async (to) => {
       ElMessage.error('没有权限访问该页面')
       return '/'
     }
+  }
+  if (
+    auth.isAdmin &&
+    !to.path.startsWith('/admin') &&
+    to.path !== '/login' &&
+    to.path !== '/register'
+  ) {
+    return '/admin/dashboard'
   }
   return true
 })

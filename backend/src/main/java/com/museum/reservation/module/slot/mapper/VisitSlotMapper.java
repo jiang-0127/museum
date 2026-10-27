@@ -29,6 +29,14 @@ public interface VisitSlotMapper extends BaseMapper<VisitSlot> {
             """)
     int releaseStock(@Param("slotId") Long slotId, @Param("count") int count);
 
+    @Update("""
+            UPDATE visit_slot
+            SET status = 0, updated_at = NOW()
+            WHERE status = 1
+              AND (visit_date < CURDATE() OR (visit_date = CURDATE() AND start_time <= CURTIME()))
+            """)
+    int closeElapsedSlots();
+
     IPage<SlotVO> selectVoPage(IPage<SlotVO> page,
                                @Param("museumId") Long museumId,
                                @Param("exhibitionId") Long exhibitionId,

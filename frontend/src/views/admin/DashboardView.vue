@@ -8,16 +8,16 @@ import {
   statisticsMuseumHeat,
   statisticsOverview,
   statisticsSlotSaturation,
-  statisticsTicketDistribution,
+  statisticsTicketDistributionDetail,
   statisticsTrend,
 } from '@/api/admin'
-import type { NameValue, Overview, SlotSaturation, TrendPoint } from '@/types'
+import type { NameValue, Overview, SlotSaturation, TicketDistribution, TrendPoint } from '@/types'
 
 const overview = ref<Overview | null>(null)
 const trend = ref<TrendPoint[]>([])
 const heat = ref<NameValue[]>([])
 const saturation = ref<SlotSaturation[]>([])
-const distribution = ref<NameValue[]>([])
+const distribution = ref<TicketDistribution[]>([])
 const trendDays = ref(7)
 const loading = ref(true)
 
@@ -180,8 +180,15 @@ const heatOption = computed<EChartsOption>(() => ({
 const ticketKindOrder = ['普通预约票', '单展票', '全馆联票']
 
 const distributionData = computed(() => {
-  const map = new Map(distribution.value.map((item) => [item.name, Number(item.value) || 0]))
-  return ticketKindOrder.map((name) => ({ name, value: map.get(name) ?? 0 }))
+  const map = new Map(distribution.value.map((item) => [item.name, item]))
+  return ticketKindOrder.map((name) => {
+    const found = map.get(name)
+    return {
+      name,
+      value: Number(found?.value) || 0,
+      children: (found?.children ?? []).filter((child) => child.value > 0),
+    }
+  })
 })
 
 const pieOption = computed<EChartsOption>(() => {
@@ -195,14 +202,27 @@ const pieOption = computed<EChartsOption>(() => {
       padding: [10, 14],
       textStyle: { color: '#f7f3eb', fontSize: 11 },
       formatter: (params: unknown) => {
-        const item = params as { name: string; value: number; percent?: number }
+        const item = params as {
+          name: string
+          value: number
+          percent?: number
+          data?: { children?: NameValue[] }
+        }
         const percent =
           item.percent != null
             ? item.percent.toFixed(1)
             : total
               ? ((item.value / total) * 100).toFixed(1)
               : '0.0'
-        return `${item.name}<br/>数量：${item.value} 单<br/>比例：${percent}%`
+        const head = `${item.name}<br/>数量：${item.value} 单<br/>比例：${percent}%`
+        const children = item.data?.children ?? []
+        if (!children.length) {
+          return head
+        }
+        const detail = children
+          .map((child) => `${child.name}：${child.value} 单`)
+          .join('<br/>')
+        return `${head}<br/><span style="display:inline-block;margin-top:4px;color:#a9b0bd">具体票种</span><br/>${detail}`
       },
     },
     legend: {
@@ -243,7 +263,7 @@ async function load() {
       statisticsTrend(trendDays.value),
       statisticsMuseumHeat(30),
       statisticsSlotSaturation(),
-      statisticsTicketDistribution(),
+      statisticsTicketDistributionDetail(),
     ])
     overview.value = overviewData
     trend.value = trendData

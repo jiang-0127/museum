@@ -5,6 +5,8 @@ import com.museum.reservation.module.statistics.mapper.StatisticsMapper;
 import com.museum.reservation.module.statistics.vo.NameValue;
 import com.museum.reservation.module.statistics.vo.OverviewVO;
 import com.museum.reservation.module.statistics.vo.SlotSaturationVO;
+import com.museum.reservation.module.statistics.vo.TicketDistributionVO;
+import com.museum.reservation.module.statistics.vo.TicketKindDetailRow;
 import com.museum.reservation.module.statistics.vo.TrendPoint;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -14,6 +16,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -72,7 +75,54 @@ public class StatisticsService {
     }
 
     public List<NameValue> ticketDistribution() {
-        return statisticsMapper.selectTicketDistribution();
+        List<NameValue> result = new ArrayList<>();
+        for (TicketKindDetailRow row : statisticsMapper.selectTicketDistributionRows()) {
+            NameValue item = new NameValue();
+            item.setName(kindLabel(row.getKindName()));
+            item.setValue(row.getValue());
+            result.add(item);
+        }
+        return result;
+    }
+
+    public List<TicketDistributionVO> ticketDistributionDetail() {
+        Map<String, TicketDistributionVO> kindMap = new LinkedHashMap<>();
+        for (TicketKindDetailRow row : statisticsMapper.selectTicketDistributionDetail()) {
+            String label = kindLabel(row.getKindName());
+            TicketDistributionVO kind = kindMap.computeIfAbsent(label, name -> {
+                TicketDistributionVO vo = new TicketDistributionVO();
+                vo.setName(name);
+                vo.setValue(0);
+                vo.setChildren(new ArrayList<>());
+                return vo;
+            });
+            kind.setValue(kind.getValue() + row.getValue());
+            NameValue child = new NameValue();
+            child.setName(buildTicketLabel(row));
+            child.setValue(row.getValue());
+            kind.getChildren().add(child);
+        }
+        return new ArrayList<>(kindMap.values());
+    }
+
+    private String buildTicketLabel(TicketKindDetailRow row) {
+        String museumName = row.getMuseumName();
+        String ticketName = row.getTicketName();
+        if (museumName == null || museumName.isBlank()) {
+            return ticketName;
+        }
+        return museumName + " · " + ticketName;
+    }
+
+    private String kindLabel(String kind) {
+        if (kind == null) {
+            return "普通预约票";
+        }
+        return switch (kind) {
+            case "SINGLE" -> "单展票";
+            case "COMBO" -> "全馆联票";
+            default -> "普通预约票";
+        };
     }
 
     public List<SlotSaturationVO> slotSaturation() {

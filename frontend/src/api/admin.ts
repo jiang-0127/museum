@@ -16,6 +16,7 @@ import type {
   SysRole,
   SystemConfig,
   TicketType,
+  TicketDistribution,
   TrendPoint,
   User,
 } from '@/types'
@@ -76,6 +77,8 @@ export const statisticsMuseumHeat = (days = 30) =>
   get<NameValue[]>('/admin/statistics/museum-heat', { days })
 export const statisticsTicketDistribution = () =>
   get<NameValue[]>('/admin/statistics/ticket-distribution')
+export const statisticsTicketDistributionDetail = () =>
+  get<TicketDistribution[]>('/admin/statistics/ticket-distribution-detail')
 export const statisticsSlotSaturation = () =>
   get<SlotSaturation[]>('/admin/statistics/slot-saturation')
 

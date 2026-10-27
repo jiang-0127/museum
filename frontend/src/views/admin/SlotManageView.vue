@@ -57,6 +57,33 @@ function saturation(row: Slot) {
   return Math.min(100, Math.round((row.bookedCount / row.totalCapacity) * 100))
 }
 
+type SlotPhase = 'upcoming' | 'ongoing' | 'ended'
+
+function slotPhase(row: Slot): SlotPhase {
+  const start = dayjs(`${row.visitDate} ${row.startTime}`)
+  const end = dayjs(`${row.visitDate} ${row.endTime}`)
+  const now = dayjs()
+  if (!now.isBefore(end)) return 'ended'
+  if (!now.isBefore(start)) return 'ongoing'
+  return 'upcoming'
+}
+
+function phaseHint(row: Slot) {
+  const phase = slotPhase(row)
+  if (phase === 'ended') return '时段已结束，系统已自动关闭'
+  if (phase === 'ongoing') return '时段正在进行中，系统已自动关闭'
+  return ''
+}
+
+function displayStatus(row: Slot) {
+  return slotPhase(row) === 'upcoming' && row.status === 1 ? '开放' : '关闭'
+}
+
+const formStarted = computed(() => {
+  if (!form.visitDate || !form.startTime) return false
+  return !dayjs(`${form.visitDate} ${form.startTime}`).isAfter(dayjs())
+})
+
 async function load() {
   loading.value = true
   try {
@@ -109,7 +136,10 @@ async function save() {
   }
   saving.value = true
   try {
-    const payload = { ...form, exhibitionId: form.exhibitionId || null }
+    const payload: Record<string, unknown> = { ...form, exhibitionId: form.exhibitionId || null }
+    if (!dayjs(`${form.visitDate} ${form.startTime}`).isAfter(dayjs())) {
+      payload.status = 0
+    }
     if (editingId.value) {
       await updateSlot(editingId.value, payload)
       ElMessage.success('时段已更新')
@@ -140,6 +170,10 @@ async function remove(row: Slot) {
 }
 
 async function toggleStatus(row: Slot) {
+  if (slotPhase(row) !== 'upcoming') {
+    ElMessage.info('已结束或正在进行的时段不能重新开放')
+    return
+  }
   try {
     await updateSlot(row.id, {
       museumId: row.museumId,
@@ -178,7 +212,7 @@ onMounted(async () => {
     <PageHeader
       eyebrow="CAPACITY & SCHEDULE"
       title="时段与票额"
-      desc="设置每日参观时段与总容量。余票由系统实时计算，取消预约会自动释放票额。"
+      desc="设置每日参观时段与总容量，并结合票种与预约记录展示可售票种和预约情况。已结束或正在进行的时段会自动关闭，取消预约会自动释放票额。"
     >
       <el-button type="primary" @click="openCreate">
         <el-icon><Plus /></el-icon>
@@ -222,10 +256,29 @@ onMounted(async () => {
             {{ row.startTime.slice(0, 5) }} - {{ row.endTime.slice(0, 5) }}
           </template>
         </el-table-column>
-        <el-table-column prop="exhibitionName" label="关联展览" width="150">
+        <el-table-column prop="exhibitionName" label="关联展览" width="140">
           <template #default="{ row }">{{ row.exhibitionName || '常设展' }}</template>
         </el-table-column>
-        <el-table-column label="票额" width="190">
+        <el-table-column label="可售票种" width="110" align="center">
+          <template #default="{ row }">
+            <el-tooltip v-if="row.ticketTypeNames?.length" placement="top" effect="light">
+              <template #content>
+                <div class="ticket-tip">
+                  <div v-for="name in row.ticketTypeNames" :key="name">{{ name }}</div>
+                </div>
+              </template>
+              <span class="stat-link">{{ row.ticketTypeCount }} 个</span>
+            </el-tooltip>
+            <span v-else class="stat-empty">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="预约记录" width="110" align="center">
+          <template #default="{ row }">
+            <span class="stat-text">{{ row.reservationOrderCount ?? 0 }} 单</span>
+            <small class="stat-sub">{{ row.reservationVisitorCount ?? 0 }} 人</small>
+          </template>
+        </el-table-column>
+        <el-table-column label="票额" width="170">
           <template #default="{ row }">
             <div class="capacity-cell">
               <div class="cap-text">
@@ -248,18 +301,27 @@ onMounted(async () => {
         </el-table-column>
         <el-table-column label="状态" width="90" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'info'" effect="plain" round>
-              {{ row.status === 1 ? '开放' : '关闭' }}
-            </el-tag>
+            <el-tooltip :disabled="slotPhase(row) === 'upcoming'" :content="phaseHint(row)" placement="top">
+              <el-tag :type="displayStatus(row) === '开放' ? 'success' : 'info'" effect="plain" round>
+                {{ displayStatus(row) }}
+              </el-tag>
+            </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="190" fixed="right">
+        <el-table-column label="操作" width="210" fixed="right">
           <template #default="{ row }">
-            <el-button text size="small" @click="openEdit(row)">编辑</el-button>
-            <el-button text size="small" @click="toggleStatus(row)">
-              {{ row.status === 1 ? '关闭' : '开放' }}
-            </el-button>
-            <el-button text size="small" type="danger" @click="remove(row)">删除</el-button>
+            <div class="op-actions">
+              <el-button text size="small" @click="openEdit(row)">编辑</el-button>
+              <el-button
+                text
+                size="small"
+                :disabled="slotPhase(row) !== 'upcoming'"
+                @click="toggleStatus(row)"
+              >
+                {{ slotPhase(row) !== 'upcoming' ? '已关闭' : row.status === 1 ? '关闭' : '开放' }}
+              </el-button>
+              <el-button text size="small" type="danger" @click="remove(row)">删除</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -325,14 +387,14 @@ onMounted(async () => {
           </el-form-item>
           <el-form-item label="状态">
             <el-select v-model="form.status" style="width: 100%">
-              <el-option label="开放" :value="1" />
+              <el-option label="开放" :value="1" :disabled="formStarted" />
               <el-option label="关闭" :value="0" />
             </el-select>
           </el-form-item>
         </div>
         <p class="form-tip">
           <el-icon><InfoFilled /></el-icon>
-          编辑已有预约的时段时，不能修改日期、时间或把容量降到已预约人数以下。
+          编辑已有预约的时段时，不能修改日期、时间或把容量降到已预约人数以下。已开始或已结束的时段会自动置为关闭。
         </p>
       </el-form>
       <template #footer>
@@ -344,6 +406,17 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.op-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.op-actions :deep(.el-button + .el-button) {
+  margin-left: 8px;
+}
+
 .total-note {
   color: var(--muted);
   font-size: 11px;
@@ -353,6 +426,41 @@ onMounted(async () => {
   margin-left: 6px;
   color: var(--muted);
   font-size: 9px;
+}
+
+.stat-link {
+  color: var(--gold-deep);
+  font-size: 11px;
+  border-bottom: 1px dashed rgba(176, 138, 79, 0.5);
+  cursor: help;
+}
+
+.stat-empty {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.stat-text {
+  display: block;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.stat-sub {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 9.5px;
+}
+
+.ticket-tip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+  font-size: 11.5px;
+  line-height: 1.5;
 }
 
 .capacity-cell {

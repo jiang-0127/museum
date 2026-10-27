@@ -98,6 +98,10 @@ export interface Slot {
   remaining: number
   status: number
   createdAt?: string
+  ticketTypeCount?: number
+  ticketTypeNames?: string[]
+  reservationOrderCount?: number
+  reservationVisitorCount?: number
 }
 
 export interface VisitorInfo {
@@ -193,6 +197,12 @@ export interface TrendPoint {
 export interface NameValue {
   name: string
   value: number
+}
+
+export interface TicketDistribution {
+  name: string
+  value: number
+  children: NameValue[]
 }
 
 export interface SlotSaturation {

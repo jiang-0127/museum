@@ -2,6 +2,8 @@ package com.museum.reservation.module.statistics.mapper;
 
 import com.museum.reservation.module.statistics.vo.NameValue;
 import com.museum.reservation.module.statistics.vo.SlotSaturationVO;
+import com.museum.reservation.module.statistics.vo.TicketDistributionVO;
+import com.museum.reservation.module.statistics.vo.TicketKindDetailRow;
 import com.museum.reservation.module.statistics.vo.TrendPoint;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -77,22 +79,27 @@ public interface StatisticsMapper {
     List<NameValue> selectMuseumHeat(@Param("start") LocalDateTime start);
 
     @Select("""
-            SELECT CASE t.ticket_kind
-                       WHEN 'SINGLE' THEN '单展票'
-                       WHEN 'COMBO' THEN '全馆联票'
-                       ELSE '普通预约票'
-                   END AS name,
+            SELECT COALESCE(t.ticket_kind, 'BASIC') AS kind_name,
                    COUNT(r.id) AS value
             FROM ticket_type t
             LEFT JOIN reservation r ON r.ticket_type_id = t.id AND r.status <> 'CANCELED'
-            GROUP BY CASE t.ticket_kind
-                         WHEN 'SINGLE' THEN '单展票'
-                         WHEN 'COMBO' THEN '全馆联票'
-                         ELSE '普通预约票'
-                     END
+            GROUP BY COALESCE(t.ticket_kind, 'BASIC')
             ORDER BY value DESC
             """)
-    List<NameValue> selectTicketDistribution();
+    List<TicketKindDetailRow> selectTicketDistributionRows();
+
+    @Select("""
+            SELECT COALESCE(t.ticket_kind, 'BASIC') AS kind_name,
+                   m.name AS museum_name,
+                   t.name AS ticket_name,
+                   COUNT(r.id) AS value
+            FROM ticket_type t
+            LEFT JOIN museum m ON m.id = t.museum_id
+            LEFT JOIN reservation r ON r.ticket_type_id = t.id AND r.status <> 'CANCELED'
+            GROUP BY COALESCE(t.ticket_kind, 'BASIC'), m.name, t.name
+            ORDER BY value DESC
+            """)
+    List<TicketKindDetailRow> selectTicketDistributionDetail();
 
     @Select("""
             SELECT s.id, m.name AS museum_name, s.visit_date, s.start_time, s.end_time,

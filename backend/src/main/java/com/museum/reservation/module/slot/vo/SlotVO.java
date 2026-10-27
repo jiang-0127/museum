@@ -5,6 +5,7 @@ import lombok.Data;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.util.List;
 
 @Data
 public class SlotVO {
@@ -21,4 +22,8 @@ public class SlotVO {
     private Integer remaining;
     private Integer status;
     private LocalDateTime createdAt;
+    private Integer ticketTypeCount;
+    private List<String> ticketTypeNames;
+    private Integer reservationOrderCount;
+    private Integer reservationVisitorCount;
 }
