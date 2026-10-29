@@ -100,7 +100,7 @@ const router = createRouter({
           path: 'slots',
           name: 'admin-slots',
           component: () => import('@/views/admin/SlotManageView.vue'),
-          meta: { title: '时段与票额' },
+          meta: { title: '入馆批次与票额' },
         },
         {
           path: 'tickets',

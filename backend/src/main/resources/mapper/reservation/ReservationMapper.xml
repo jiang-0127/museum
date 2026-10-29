@@ -5,7 +5,7 @@
     <sql id="reservationColumns">
         r.id, r.order_no, r.user_id, r.museum_id, m.name AS museum_name,
         r.exhibition_id, e.name AS exhibition_name, r.slot_id,
-        s.visit_date, s.start_time, s.end_time,
+        COALESCE(s.visit_date, r.visit_date) AS visit_date, s.start_time, s.end_time,
         r.ticket_type_id,
         CONCAT(t.name,
                CASE t.audience_type
@@ -41,8 +41,8 @@
                 OR r.contact_name LIKE CONCAT('%', #{query.keyword}, '%')
                 OR r.contact_phone LIKE CONCAT('%', #{query.keyword}, '%'))
             </if>
-            <if test="query.dateStart != null">AND s.visit_date &gt;= #{query.dateStart}</if>
-            <if test="query.dateEnd != null">AND s.visit_date &lt;= #{query.dateEnd}</if>
+            <if test="query.dateStart != null">AND COALESCE(s.visit_date, r.visit_date) &gt;= #{query.dateStart}</if>
+            <if test="query.dateEnd != null">AND COALESCE(s.visit_date, r.visit_date) &lt;= #{query.dateEnd}</if>
         </where>
         ORDER BY r.created_at DESC
     </select>

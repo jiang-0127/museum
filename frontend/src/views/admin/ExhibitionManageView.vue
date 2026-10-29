@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import dayjs from 'dayjs'
 import PageHeader from '@/components/PageHeader.vue'
@@ -25,6 +25,7 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const saving = ref(false)
 const editingId = ref<number | null>(null)
+const editingWasEnabled = ref(false)
 const formRef = ref<FormInstance>()
 
 const emptyForm = () => ({
@@ -37,6 +38,15 @@ const emptyForm = () => ({
 })
 
 const form = reactive(emptyForm())
+
+const selectedMuseum = computed(
+  () => museums.value.find((item) => item.id === form.museumId) || null,
+)
+
+function disabledDate(d: Date) {
+  if (editingId.value) return false
+  return dayjs(d).isBefore(dayjs(), 'day')
+}
 
 const rules: FormRules = {
   museumId: [{ required: true, message: '请选择所属博物馆', trigger: 'change' }],
@@ -68,12 +78,14 @@ function search() {
 
 function openCreate() {
   editingId.value = null
+  editingWasEnabled.value = false
   Object.assign(form, emptyForm())
   dialogVisible.value = true
 }
 
 function openEdit(row: Exhibition) {
   editingId.value = row.id
+  editingWasEnabled.value = row.status === 1
   Object.assign(form, {
     museumId: row.museumId,
     name: row.name,
@@ -89,6 +101,14 @@ async function save() {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
   if (!form.dateRange?.length) return
+  if (!editingId.value && dayjs(form.dateRange[0]).isBefore(dayjs(), 'day')) {
+    ElMessage.warning('展览开始日期不能早于今天')
+    return
+  }
+  if (form.status === 1 && dayjs(form.dateRange[1]).isBefore(dayjs(), 'day')) {
+    ElMessage.warning('展览结束日期不能早于今天')
+    return
+  }
   saving.value = true
   try {
     const payload = {
@@ -102,7 +122,11 @@ async function save() {
     }
     if (editingId.value) {
       await updateExhibition(editingId.value, payload)
-      ElMessage.success('展览信息已更新')
+      if (editingWasEnabled.value && form.status === 0) {
+        ElMessage.success('已更新，并级联停用该展览的单展票与关联的未来批次')
+      } else {
+        ElMessage.success('展览信息已更新')
+      }
     } else {
       await createExhibition(payload)
       ElMessage.success('展览已创建')
@@ -116,16 +140,58 @@ async function save() {
 
 async function remove(row: Exhibition) {
   try {
-    await ElMessageBox.confirm(`确认删除展览「${row.name}」吗？`, '删除展览', {
-      type: 'warning',
-      confirmButtonText: '确认删除',
-      cancelButtonText: '取消',
-    })
+    await ElMessageBox.confirm(
+      `确认删除展览「${row.name}」吗？存在有效预约时不能删除。`,
+      '删除展览',
+      {
+        type: 'warning',
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+      },
+    )
     await deleteExhibition(row.id)
     ElMessage.success('已删除')
     load()
   } catch {
-    // 取消
+    // 取消或后端拒绝
+  }
+}
+
+async function toggleStatus(row: Exhibition) {
+  const nextStatus = row.status === 1 ? 0 : 1
+  if (nextStatus === 0) {
+    try {
+      await ElMessageBox.confirm(
+        `停用「${row.name}」将同时停用其单展票与关联的未来入馆批次，确认停用吗？`,
+        '停用展览',
+        {
+          type: 'warning',
+          confirmButtonText: '确认停用',
+          cancelButtonText: '取消',
+        },
+      )
+    } catch {
+      return
+    }
+  }
+  try {
+    await updateExhibition(row.id, {
+      museumId: row.museumId,
+      name: row.name,
+      description: row.description || '',
+      coverUrl: row.coverUrl || '',
+      startDate: row.startDate,
+      endDate: row.endDate,
+      status: nextStatus,
+    })
+    ElMessage.success(
+      nextStatus === 0
+        ? '已停用，并级联停用其单展票与关联的未来批次'
+        : '已启用该展览（相关票种与批次需按需单独启用）',
+    )
+    load()
+  } catch {
+    // 错误已提示
   }
 }
 
@@ -146,7 +212,7 @@ onMounted(async () => {
     <PageHeader
       eyebrow="EXHIBITION MANAGEMENT"
       title="展览管理"
-      desc="维护各博物馆的常设展与特展信息，展览日期与封面会展示在游客端。"
+      desc="维护各博物馆的常设展与特展信息。停用后记录保留并显示为停用；删除后不再展示。停用或删除都会级联处理相关单展票与入馆批次。"
     >
       <el-button type="primary" @click="openCreate">
         <el-icon><Plus /></el-icon>
@@ -203,9 +269,12 @@ onMounted(async () => {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="140" fixed="right">
+        <el-table-column label="操作" width="190" fixed="right">
           <template #default="{ row }">
             <el-button text size="small" @click="openEdit(row)">编辑</el-button>
+            <el-button text size="small" @click="toggleStatus(row)">
+              {{ row.status === 1 ? '停用' : '启用' }}
+            </el-button>
             <el-button text size="small" type="danger" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -227,7 +296,13 @@ onMounted(async () => {
         <div class="form-cols">
           <el-form-item label="所属博物馆" prop="museumId">
             <el-select v-model="form.museumId" placeholder="请选择博物馆" style="width: 100%">
-              <el-option v-for="museum in museums" :key="museum.id" :label="museum.name" :value="museum.id" />
+              <el-option
+                v-for="museum in museums"
+                :key="museum.id"
+                :label="museum.status === 1 ? museum.name : `${museum.name}（已停用）`"
+                :value="museum.id"
+                :disabled="museum.status !== 1"
+              />
             </el-select>
           </el-form-item>
           <el-form-item label="状态">
@@ -248,8 +323,12 @@ onMounted(async () => {
             range-separator="至"
             start-placeholder="开始日期"
             end-placeholder="结束日期"
+            :disabled-date="disabledDate"
             style="width: 100%"
           />
+          <span v-if="selectedMuseum" class="range-hint">
+            所属博物馆开放时间 {{ selectedMuseum.openTime }} - {{ selectedMuseum.closeTime }}，展览按天展示，每日开放以该时间为准。
+          </span>
         </el-form-item>
         <el-form-item label="封面图片">
           <ImageUpload v-model="form.coverUrl" height="190px" />
@@ -270,6 +349,14 @@ onMounted(async () => {
 .total-note {
   color: var(--muted);
   font-size: 11px;
+}
+
+.range-hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--gold-deep);
+  font-size: 10.5px;
+  line-height: 1.6;
 }
 
 .exhibition-cell {

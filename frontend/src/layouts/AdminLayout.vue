@@ -14,7 +14,7 @@ const businessMenus = [
   { path: '/admin/dashboard', label: '数据看板', icon: 'DataAnalysis' },
   { path: '/admin/museums', label: '博物馆管理', icon: 'OfficeBuilding' },
   { path: '/admin/exhibitions', label: '展览管理', icon: 'Picture' },
-  { path: '/admin/slots', label: '时段与票额', icon: 'Calendar' },
+  { path: '/admin/slots', label: '入馆批次与票额', icon: 'Calendar' },
   { path: '/admin/tickets', label: '票种管理', icon: 'Ticket' },
   { path: '/admin/reservations', label: '预约订单', icon: 'Tickets' },
   { path: '/admin/checkin', label: '票码核销', icon: 'Tickets' },

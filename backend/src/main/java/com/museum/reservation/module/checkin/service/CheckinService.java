@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 
 @Service
 @RequiredArgsConstructor
@@ -72,22 +73,42 @@ public class CheckinService {
             throw new BusinessException("当前预约状态不能核销");
         }
 
-        VisitSlot slot = slotMapper.selectById(reservation.getSlotId());
-        if (slot == null) {
-            throw new BusinessException("参观时段不存在");
-        }
+        LocalDate visitDate;
+        LocalTime startTime = null;
+        LocalTime endTime = null;
         LocalDate today = LocalDate.now();
-        if (!slot.getVisitDate().equals(today)) {
-            throw new BusinessException("电子票仅限参观日期当天使用，票面日期为 " + slot.getVisitDate());
-        }
         LocalDateTime now = LocalDateTime.now();
-        LocalDateTime start = slot.getVisitDate().atTime(slot.getStartTime());
-        LocalDateTime end = slot.getVisitDate().atTime(slot.getEndTime());
-        if (now.isBefore(start.minusMinutes(90))) {
-            throw new BusinessException("尚未到入场时间，可提前 90 分钟入场");
-        }
-        if (now.isAfter(end.plusMinutes(30))) {
-            throw new BusinessException("已超过入场时段，无法核销");
+        if (reservation.getSlotId() == null) {
+            visitDate = reservation.getVisitDate();
+            if (visitDate == null || !visitDate.equals(today)) {
+                throw new BusinessException("电子票仅限参观日期当天使用，票面日期为 " + visitDate);
+            }
+            Museum museum = museumMapper.selectById(reservation.getMuseumId());
+            LocalTime open = parseTime(museum == null ? null : museum.getOpenTime(), LocalTime.of(9, 0));
+            LocalTime close = parseTime(museum == null ? null : museum.getCloseTime(), LocalTime.of(17, 0));
+            LocalTime current = now.toLocalTime();
+            if (current.isBefore(open) || current.isAfter(close)) {
+                throw new BusinessException("当前不在博物馆开放时间内，无法核销");
+            }
+        } else {
+            VisitSlot slot = slotMapper.selectById(reservation.getSlotId());
+            if (slot == null) {
+                throw new BusinessException("参观时段不存在");
+            }
+            visitDate = slot.getVisitDate();
+            startTime = slot.getStartTime();
+            endTime = slot.getEndTime();
+            if (!visitDate.equals(today)) {
+                throw new BusinessException("电子票仅限参观日期当天使用，票面日期为 " + visitDate);
+            }
+            LocalDateTime start = visitDate.atTime(startTime);
+            LocalDateTime end = visitDate.atTime(endTime);
+            if (now.isBefore(start.minusMinutes(90))) {
+                throw new BusinessException("尚未到入场时间，可提前 90 分钟入场");
+            }
+            if (now.isAfter(end.plusMinutes(30))) {
+                throw new BusinessException("已超过入场时段，无法核销");
+            }
         }
 
         LoginUser operator = CurrentUser.get();
@@ -113,17 +134,27 @@ public class CheckinService {
         result.setOrderNo(reservation.getOrderNo());
         result.setMuseumName(museum == null ? "" : museum.getName());
         result.setContactName(reservation.getContactName());
-        result.setVisitDate(slot.getVisitDate());
-        result.setStartTime(slot.getStartTime());
-        result.setEndTime(slot.getEndTime());
+        result.setVisitDate(visitDate);
+        result.setStartTime(startTime);
+        result.setEndTime(endTime);
         result.setVisitorCount(reservation.getVisitorCount());
         result.setStatus(Constants.RESERVATION_CHECKED_IN);
         result.setCheckinTime(checkinTime);
         return result;
     }
 
-    public PageResult<CheckinRecord> recordPage(long page, long size, String keyword) {
-        Page<CheckinRecord> result = checkinRecordMapper.selectPage(new Page<>(page, size),
+    private LocalTime parseTime(String value, LocalTime fallback) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        try {
+            return LocalTime.parse(value.trim());
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
+
+    public PageResult<CheckinRecord> recordPage(long page, long size, String keyword) {        Page<CheckinRecord> result = checkinRecordMapper.selectPage(new Page<>(page, size),
                 new LambdaQueryWrapper<CheckinRecord>()
                         .like(keyword != null && !keyword.isBlank(), CheckinRecord::getOrderNo, keyword)
                         .orderByDesc(CheckinRecord::getCheckinTime));

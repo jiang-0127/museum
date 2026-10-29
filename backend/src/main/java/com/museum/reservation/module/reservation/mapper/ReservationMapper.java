@@ -21,4 +21,17 @@ public interface ReservationMapper extends BaseMapper<Reservation> {
 
     @Select("select * from reservation where order_no = #{orderNo}")
     Reservation selectByOrderNo(@Param("orderNo") String orderNo);
+
+    @Select("""
+            SELECT COUNT(*) FROM visitor v
+            JOIN reservation r ON r.id = v.reservation_id
+            WHERE r.museum_id = #{museumId}
+              AND r.visit_date = #{visitDate}
+              AND r.slot_id IS NULL
+              AND r.status IN ('PENDING_PAYMENT', 'RESERVED', 'CHECKED_IN')
+              AND v.id_card = #{idCard}
+            """)
+    long countBasicGuest(@Param("museumId") Long museumId,
+                         @Param("visitDate") java.time.LocalDate visitDate,
+                         @Param("idCard") String idCard);
 }

@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import dayjs from 'dayjs'
@@ -7,11 +7,13 @@ import {
   adminExhibitions,
   adminMuseums,
   adminSlots,
-  createSlot,
+  createSlotBatch,
   deleteSlot,
   updateSlot,
 } from '@/api/admin'
+import { getBasicQuota } from '@/api/public'
 import type { Exhibition, Museum, Slot } from '@/types'
+import { isClosedOn } from '@/utils/schedule'
 
 const rows = ref<Slot[]>([])
 const museums = ref<Museum[]>([])
@@ -27,11 +29,23 @@ const dialogVisible = ref(false)
 const saving = ref(false)
 const editingId = ref<number | null>(null)
 const formRef = ref<FormInstance>()
+const quotaSummary = ref<{
+  daily: number
+  used: number
+  count: number
+  basic: number
+  booked: number
+  remaining: number
+  orderCount: number
+  visitorCount: number
+  closed: boolean
+} | null>(null)
 
+const today = dayjs().format('YYYY-MM-DD')
 const emptyForm = () => ({
   museumId: undefined as number | undefined,
-  exhibitionId: undefined as number | undefined,
-  visitDate: dayjs().format('YYYY-MM-DD'),
+  dateRange: [today, today] as [string, string],
+  visitDate: today,
   startTime: '09:00:00',
   endTime: '11:00:00',
   totalCapacity: 200,
@@ -42,15 +56,151 @@ const form = reactive(emptyForm())
 
 const rules: FormRules = {
   museumId: [{ required: true, message: '请选择博物馆', trigger: 'change' }],
-  visitDate: [{ required: true, message: '请选择日期', trigger: 'change' }],
   startTime: [{ required: true, message: '请选择开始时间', trigger: 'change' }],
   endTime: [{ required: true, message: '请选择结束时间', trigger: 'change' }],
   totalCapacity: [{ required: true, message: '请输入总容量', trigger: 'blur' }],
 }
 
-const formExhibitions = computed(() =>
-  exhibitions.value.filter((item) => !form.museumId || item.museumId === form.museumId),
+const formStarted = computed(() => {
+  const d = editingId.value ? form.visitDate : form.dateRange[0]
+  if (!d || !form.startTime) return false
+  return !dayjs(`${d} ${form.startTime}`).isAfter(dayjs())
+})
+
+const museumDateBounds = computed(() => {
+  if (!form.museumId) return null
+  const list = exhibitions.value.filter(
+    (item) => item.museumId === form.museumId && item.status === 1,
+  )
+  if (!list.length) return null
+  const starts = list.map((item) => dayjs(item.startDate))
+  const ends = list.map((item) => dayjs(item.endDate))
+  return {
+    start: starts.reduce((a, b) => (a.isBefore(b) ? a : b)),
+    end: ends.reduce((a, b) => (a.isAfter(b) ? a : b)),
+  }
+})
+
+const selectedMuseum = computed(
+  () => museums.value.find((item) => item.id === form.museumId) || null,
 )
+
+const selectedMuseumDailyCapacity = computed(() => selectedMuseum.value?.dailyCapacity ?? 0)
+
+const museumOpenTime = computed(() => selectedMuseum.value?.openTime?.slice(0, 5) || '')
+
+const museumCloseTime = computed(() => selectedMuseum.value?.closeTime?.slice(0, 5) || '')
+
+const selectedDateClosed = computed(() => {
+  if (!museumId.value || !date.value) return false
+  const museum = museums.value.find((item) => item.id === museumId.value)
+  return isClosedOn(museum?.closedDays, date.value)
+})
+
+function isRowClosed(row: Slot) {
+  const museum = museums.value.find((item) => item.id === row.museumId)
+  return isClosedOn(museum?.closedDays, row.visitDate)
+}
+
+function rowStatus(row: Slot) {
+  if (isRowClosed(row)) return '关闭'
+  return slotPhase(row) === 'upcoming' && row.status === 1 ? '开放' : '关闭'
+}
+
+function isEditable(row: Slot) {
+  return !isRowClosed(row) && slotPhase(row) === 'upcoming'
+}
+
+function statusHint(row: Slot) {
+  if (isRowClosed(row)) return '博物馆每周闭馆日，暂停预约且不可修改'
+  const phase = slotPhase(row)
+  if (phase === 'ended') return '入馆批次已结束，不可修改'
+  if (phase === 'ongoing') return '入馆批次正在进行中，不可修改'
+  return row.status === 1 ? '当前开放预约' : '已关闭，暂不可预约'
+}
+
+function parseHM(value: string): [number, number] | null {
+  if (!value) return null
+  const [h, m] = value.split(':').map(Number)
+  if (Number.isNaN(h) || Number.isNaN(m)) return null
+  return [h, m]
+}
+
+function isPastDate(d: Date) {
+  return dayjs(d).isBefore(dayjs(), 'day')
+}
+
+function disabledDate(d: Date) {
+  if (isPastDate(d)) return true
+  const museum = selectedMuseum.value
+  if (museum && isClosedOn(museum.closedDays, dayjs(d).format('YYYY-MM-DD'))) return true
+  const bounds = museumDateBounds.value
+  if (bounds) {
+    const target = dayjs(d)
+    if (target.isBefore(bounds.start, 'day') || target.isAfter(bounds.end, 'day')) return true
+  }
+  return false
+}
+
+function selectedStartDate() {
+  return editingId.value ? form.visitDate : form.dateRange?.[0]
+}
+
+function disabledStartHours() {
+  const open = parseHM(museumOpenTime.value)
+  const close = parseHM(museumCloseTime.value)
+  const d = selectedStartDate()
+  const todayHour = d && dayjs(d).isSame(dayjs(), 'day') ? dayjs().hour() : -1
+  const disabled = new Set<number>()
+  for (let hour = 0; hour < 24; hour += 1) {
+    if (open && hour < open[0]) disabled.add(hour)
+    if (close && hour > close[0]) disabled.add(hour)
+    if (close && hour === close[0] && close[1] === 0) disabled.add(hour)
+    if (todayHour >= 0 && hour < todayHour) disabled.add(hour)
+  }
+  return Array.from(disabled)
+}
+
+function disabledStartMinutes(hour: number) {
+  const open = parseHM(museumOpenTime.value)
+  const close = parseHM(museumCloseTime.value)
+  const d = selectedStartDate()
+  const disabled = new Set<number>()
+  for (let minute = 0; minute < 60; minute += 1) {
+    if (open && hour === open[0] && minute < open[1]) disabled.add(minute)
+    if (close && hour === close[0] && minute >= close[1]) disabled.add(minute)
+    if (d && dayjs(d).isSame(dayjs(), 'day') && hour === dayjs().hour() && minute <= dayjs().minute()) {
+      disabled.add(minute)
+    }
+  }
+  return Array.from(disabled)
+}
+
+function disabledEndHours() {
+  const open = parseHM(museumOpenTime.value)
+  const close = parseHM(museumCloseTime.value)
+  const start = parseHM(form.startTime)
+  const disabled = new Set<number>()
+  for (let hour = 0; hour < 24; hour += 1) {
+    if (open && hour < open[0]) disabled.add(hour)
+    if (close && hour > close[0]) disabled.add(hour)
+    if (start && hour < start[0]) disabled.add(hour)
+  }
+  return Array.from(disabled)
+}
+
+function disabledEndMinutes(hour: number) {
+  const open = parseHM(museumOpenTime.value)
+  const close = parseHM(museumCloseTime.value)
+  const start = parseHM(form.startTime)
+  const disabled = new Set<number>()
+  for (let minute = 0; minute < 60; minute += 1) {
+    if (open && hour === open[0] && minute < open[1]) disabled.add(minute)
+    if (close && hour === close[0] && minute > close[1]) disabled.add(minute)
+    if (start && hour === start[0] && minute <= start[1]) disabled.add(minute)
+  }
+  return Array.from(disabled)
+}
 
 function saturation(row: Slot) {
   if (!row.totalCapacity) return 0
@@ -68,22 +218,6 @@ function slotPhase(row: Slot): SlotPhase {
   return 'upcoming'
 }
 
-function phaseHint(row: Slot) {
-  const phase = slotPhase(row)
-  if (phase === 'ended') return '时段已结束，系统已自动关闭'
-  if (phase === 'ongoing') return '时段正在进行中，系统已自动关闭'
-  return ''
-}
-
-function displayStatus(row: Slot) {
-  return slotPhase(row) === 'upcoming' && row.status === 1 ? '开放' : '关闭'
-}
-
-const formStarted = computed(() => {
-  if (!form.visitDate || !form.startTime) return false
-  return !dayjs(`${form.visitDate} ${form.startTime}`).isAfter(dayjs())
-})
-
 async function load() {
   loading.value = true
   try {
@@ -92,7 +226,7 @@ async function load() {
       size,
       museumId: museumId.value,
       date: date.value || undefined,
-      status: status.value,
+      status: selectedDateClosed.value ? undefined : status.value,
     })
     rows.value = data.records
     total.value = data.total
@@ -101,9 +235,38 @@ async function load() {
   }
 }
 
+async function loadQuotaSummary() {
+  if (!museumId.value || !date.value) {
+    quotaSummary.value = null
+    return
+  }
+  try {
+    const data = await getBasicQuota(museumId.value, date.value)
+    quotaSummary.value = {
+      daily: data.dailyCapacity,
+      used: data.slotCapacitySum,
+      count: data.slotCount,
+      basic: data.basicQuota,
+      booked: data.basicBooked,
+      remaining: data.basicRemaining,
+      orderCount: data.basicOrderCount,
+      visitorCount: data.basicBooked,
+      closed: data.closed,
+    }
+  } catch {
+    quotaSummary.value = null
+  }
+}
+
+function basicSaturation() {
+  if (!quotaSummary.value || !quotaSummary.value.basic) return 0
+  return Math.min(100, Math.round((quotaSummary.value.booked / quotaSummary.value.basic) * 100))
+}
+
 function search() {
   page.value = 1
   load()
+  loadQuotaSummary()
 }
 
 function openCreate() {
@@ -114,10 +277,18 @@ function openCreate() {
 }
 
 function openEdit(row: Slot) {
+  if (!isEditable(row)) {
+    ElMessage.warning(
+      isRowClosed(row)
+        ? '博物馆闭馆日不能修改分时批次'
+        : '已开始或已结束的分时批次不能修改',
+    )
+    return
+  }
   editingId.value = row.id
   Object.assign(form, {
     museumId: row.museumId,
-    exhibitionId: row.exhibitionId,
+    dateRange: [row.visitDate, row.visitDate],
     visitDate: row.visitDate,
     startTime: row.startTime,
     endTime: row.endTime,
@@ -130,25 +301,81 @@ function openEdit(row: Slot) {
 async function save() {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
+  const targetDate = editingId.value ? form.visitDate : form.dateRange?.[0]
+  if (selectedMuseum.value && targetDate && isClosedOn(selectedMuseum.value.closedDays, targetDate)) {
+    ElMessage.warning('该日期为博物馆每周闭馆日，不能新增或修改分时批次')
+    return
+  }
   if (form.endTime <= form.startTime) {
     ElMessage.warning('结束时间必须晚于开始时间')
     return
   }
+  if (
+    (museumOpenTime.value && form.startTime.slice(0, 5) < museumOpenTime.value) ||
+    (museumCloseTime.value && form.endTime.slice(0, 5) > museumCloseTime.value)
+  ) {
+    ElMessage.warning(`分时批次需在博物馆开放时间 ${museumOpenTime.value} - ${museumCloseTime.value} 内`)
+    return
+  }
+  if (!editingId.value) {
+    if (!form.dateRange?.[0] || !form.dateRange?.[1]) {
+      ElMessage.warning('请选择开始日期和结束日期')
+      return
+    }
+    if (dayjs(form.dateRange[1]).isBefore(dayjs(form.dateRange[0]))) {
+      ElMessage.warning('结束日期不能早于开始日期')
+      return
+    }
+    if (isPastDate(new Date(form.dateRange[0]))) {
+      ElMessage.warning('不能选择已过去的日期')
+      return
+    }
+    const bounds = museumDateBounds.value
+    if (bounds) {
+      if (dayjs(form.dateRange[0]).isBefore(bounds.start, 'day') || dayjs(form.dateRange[1]).isAfter(bounds.end, 'day')) {
+        ElMessage.warning(
+          `开设日期需在 ${bounds.start.format('YYYY-MM-DD')} 至 ${bounds.end.format('YYYY-MM-DD')} 的展览周期内`,
+        )
+        return
+      }
+    }
+    if (!dayjs(`${form.dateRange[0]} ${form.startTime}`).isAfter(dayjs())) {
+      ElMessage.warning('开始时间必须晚于当前时间')
+      return
+    }
+  }
   saving.value = true
   try {
-    const payload: Record<string, unknown> = { ...form, exhibitionId: form.exhibitionId || null }
-    if (!dayjs(`${form.visitDate} ${form.startTime}`).isAfter(dayjs())) {
-      payload.status = 0
-    }
     if (editingId.value) {
+      const payload: Record<string, unknown> = {
+        museumId: form.museumId,
+        exhibitionId: null,
+        visitDate: form.visitDate,
+        startTime: form.startTime,
+        endTime: form.endTime,
+        totalCapacity: form.totalCapacity,
+        status: form.status,
+      }
+      if (!dayjs(`${form.visitDate} ${form.startTime}`).isAfter(dayjs())) {
+        payload.status = 0
+      }
       await updateSlot(editingId.value, payload)
-      ElMessage.success('时段已更新')
+      ElMessage.success('分时批次已更新')
     } else {
-      await createSlot(payload)
-      ElMessage.success('时段已创建')
+      const created = await createSlotBatch({
+        museumId: form.museumId,
+        startDate: form.dateRange[0],
+        endDate: form.dateRange[1],
+        startTime: form.startTime,
+        endTime: form.endTime,
+        totalCapacity: form.totalCapacity,
+        status: 1,
+      })
+      ElMessage.success(created > 0 ? `已新增 ${created} 个分时批次` : '所选日期范围内没有新增入馆批次')
     }
     dialogVisible.value = false
     load()
+    loadQuotaSummary()
   } finally {
     saving.value = false
   }
@@ -157,35 +384,41 @@ async function save() {
 async function remove(row: Slot) {
   try {
     await ElMessageBox.confirm(
-      `确认删除 ${row.visitDate} ${row.startTime.slice(0, 5)} 的时段吗？已有预约的时段不能删除。`,
-      '删除时段',
+      `确认删除 ${row.visitDate} ${row.startTime.slice(0, 5)} 的分时批次吗？已有有效预约的批次不能删除。`,
+      '删除入馆批次',
       { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' },
     )
     await deleteSlot(row.id)
     ElMessage.success('已删除')
     load()
+    loadQuotaSummary()
   } catch {
     // 取消
   }
 }
 
 async function toggleStatus(row: Slot) {
-  if (slotPhase(row) !== 'upcoming') {
-    ElMessage.info('已结束或正在进行的时段不能重新开放')
+  if (!isEditable(row)) {
+    ElMessage.warning(
+      isRowClosed(row)
+        ? '博物馆闭馆日不能修改分时批次状态'
+        : '已开始或已结束的分时批次不能修改状态',
+    )
     return
   }
   try {
     await updateSlot(row.id, {
       museumId: row.museumId,
-      exhibitionId: row.exhibitionId || null,
+      exhibitionId: null,
       visitDate: row.visitDate,
       startTime: row.startTime,
       endTime: row.endTime,
       totalCapacity: row.totalCapacity,
       status: row.status === 1 ? 0 : 1,
     })
-    ElMessage.success(row.status === 1 ? '时段已关闭' : '时段已开放')
+    ElMessage.success(row.status === 1 ? '分时批次已关闭' : '分时批次已开放')
     load()
+    loadQuotaSummary()
   } catch {
     // 错误提示
   }
@@ -204,6 +437,7 @@ onMounted(async () => {
   museums.value = museumData.records
   exhibitions.value = exhibitionData.records
   load()
+  loadQuotaSummary()
 })
 </script>
 
@@ -211,12 +445,12 @@ onMounted(async () => {
   <div class="admin-page">
     <PageHeader
       eyebrow="CAPACITY & SCHEDULE"
-      title="时段与票额"
-      desc="设置每日参观时段与总容量，并结合票种与预约记录展示可售票种和预约情况。已结束或正在进行的时段会自动关闭，取消预约会自动释放票额。"
+      title="入馆批次与票额"
+      desc="普通票免选入馆批次，额度 = 日容量 − 当天分时批次容量之和；分时批次时间需在博物馆开放时间内。"
     >
       <el-button type="primary" @click="openCreate">
         <el-icon><Plus /></el-icon>
-        新增时段
+        新增分时批次
       </el-button>
     </PageHeader>
 
@@ -233,52 +467,130 @@ onMounted(async () => {
           clearable
           @change="search"
         />
-        <el-select v-model="status" placeholder="全部状态" clearable @change="search">
+        <el-select v-model="status" placeholder="全部状态" clearable :disabled="selectedDateClosed" @change="search">
           <el-option label="开放" :value="1" />
           <el-option label="关闭" :value="0" />
         </el-select>
         <el-button @click="search">查询</el-button>
       </div>
-      <span class="total-note">共 {{ total }} 个时段</span>
+      <span class="total-note">共 {{ total }} 个分时批次</span>
+    </div>
+
+    <div v-if="selectedDateClosed" class="closed-banner">
+      <el-icon><InfoFilled /></el-icon>
+      该日期为博物馆每周闭馆日，暂停预约，批次状态不可修改
+    </div>
+
+    <div class="quota-overview">
+      <div class="quota-card quota-basic">
+        <div class="quota-card-head">
+          <span class="quota-label">普通票</span>
+          <div class="quota-tags">
+            <el-tag v-if="quotaSummary?.closed" size="small" type="info" effect="plain" round>闭馆日</el-tag>
+            <el-tag size="small" effect="plain" round>免选入馆批次</el-tag>
+          </div>
+        </div>
+        <template v-if="quotaSummary">
+          <strong class="quota-value">{{ quotaSummary.closed ? 0 : quotaSummary.basic }}<small>张</small></strong>
+          <div v-if="quotaSummary.closed" class="quota-formula closed-formula">
+            博物馆每周闭馆日，当天暂停预约
+          </div>
+          <div v-else class="quota-formula">
+            日容量 {{ quotaSummary.daily }} − 分时批次 {{ quotaSummary.used }} = 普通票额度
+            {{ quotaSummary.basic }}
+          </div>
+          <div class="quota-metrics">
+            <div class="quota-metric">
+              <span>预约记录</span>
+              <strong>{{ quotaSummary.orderCount }} 单</strong>
+              <small>{{ quotaSummary.visitorCount }} 人</small>
+            </div>
+            <div class="quota-metric">
+              <span>票额</span>
+              <template v-if="quotaSummary.closed">
+                <strong>暂停预约</strong>
+                <small>闭馆日无票</small>
+              </template>
+              <template v-else>
+                <strong>{{ quotaSummary.booked }} / {{ quotaSummary.basic }}</strong>
+                <small>余 {{ quotaSummary.remaining }}</small>
+              </template>
+            </div>
+          </div>
+          <div v-if="!quotaSummary.closed" class="progress-track thin quota-progress">
+            <i
+              :style="{
+                width: `${basicSaturation()}%`,
+                background:
+                  basicSaturation() >= 90
+                    ? 'linear-gradient(90deg, #d29a94, #b0443f)'
+                    : 'linear-gradient(90deg, #d5bb8b, #b08a4f)',
+              }"
+            ></i>
+          </div>
+        </template>
+        <div v-else class="quota-empty">选择博物馆和日期后显示普通票额度</div>
+        <p class="quota-desc">
+          {{ quotaSummary?.closed ? '闭馆日不开放预约，恢复开馆后可继续预约。' : '开放时间内任意时间入馆，不占用具体入馆批次。' }}
+        </p>
+      </div>
+
+      <div class="quota-card quota-timed">
+        <div class="quota-card-head">
+          <span class="quota-label">分时入馆批次</span>
+          <div class="quota-tags">
+            <el-tag v-if="quotaSummary?.closed" size="small" type="info" effect="plain" round>闭馆日</el-tag>
+            <el-tag size="small" type="warning" effect="plain" round>有特定入馆时间</el-tag>
+          </div>
+        </div>
+        <template v-if="quotaSummary">
+          <strong class="quota-value">{{ quotaSummary.closed ? 0 : quotaSummary.used }}<small>张</small></strong>
+          <div v-if="quotaSummary.closed" class="quota-formula closed-formula">
+            博物馆每周闭馆日，分时批次暂停预约
+          </div>
+          <div v-else class="quota-formula">
+            当天分时批次 {{ quotaSummary.count }} 个，容量已从普通票额度中划出
+          </div>
+        </template>
+        <div v-else class="quota-empty">选择博物馆和日期后统计当天分时批次</div>
+        <p class="quota-desc">
+          {{ quotaSummary?.closed ? '批次仍可查看，闭馆日无法预约或修改状态。' : '按具体入馆时间核验，占用对应批次票额。' }}
+        </p>
+      </div>
     </div>
 
     <div class="table-card">
       <el-table v-loading="loading" :data="rows" row-key="id">
-        <el-table-column prop="museumName" label="博物馆" min-width="150" />
-        <el-table-column label="参观日期" width="120">
+        <el-table-column prop="museumName" label="博物馆" min-width="120" />
+        <el-table-column label="参观日期" width="100">
           <template #default="{ row }">
-            <span>{{ dayjs(row.visitDate).format('MM.DD') }}</span>
-            <small class="weekday">{{ ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][dayjs(row.visitDate).day()] }}</small>
+            <div class="date-cell">
+              <span>{{ dayjs(row.visitDate).format('MM.DD') }}</span>
+              <small class="weekday">{{ ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][dayjs(row.visitDate).day()] }}</small>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column label="时段" width="130">
+        <el-table-column label="入馆时间" width="115">
           <template #default="{ row }">
             {{ row.startTime.slice(0, 5) }} - {{ row.endTime.slice(0, 5) }}
           </template>
         </el-table-column>
-        <el-table-column prop="exhibitionName" label="关联展览" width="140">
-          <template #default="{ row }">{{ row.exhibitionName || '常设展' }}</template>
-        </el-table-column>
-        <el-table-column label="可售票种" width="110" align="center">
+        <el-table-column label="状态" width="80" align="center">
           <template #default="{ row }">
-            <el-tooltip v-if="row.ticketTypeNames?.length" placement="top" effect="light">
-              <template #content>
-                <div class="ticket-tip">
-                  <div v-for="name in row.ticketTypeNames" :key="name">{{ name }}</div>
-                </div>
-              </template>
-              <span class="stat-link">{{ row.ticketTypeCount }} 个</span>
+            <el-tooltip :content="statusHint(row)" placement="top">
+              <el-tag :type="rowStatus(row) === '开放' ? 'success' : 'info'" effect="plain" round>
+                {{ rowStatus(row) }}
+              </el-tag>
             </el-tooltip>
-            <span v-else class="stat-empty">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="预约记录" width="110" align="center">
+        <el-table-column label="预约记录" width="95" align="center">
           <template #default="{ row }">
             <span class="stat-text">{{ row.reservationOrderCount ?? 0 }} 单</span>
             <small class="stat-sub">{{ row.reservationVisitorCount ?? 0 }} 人</small>
           </template>
         </el-table-column>
-        <el-table-column label="票额" width="170">
+        <el-table-column label="票额" min-width="130">
           <template #default="{ row }">
             <div class="capacity-cell">
               <div class="cap-text">
@@ -299,26 +611,17 @@ onMounted(async () => {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="90" align="center">
-          <template #default="{ row }">
-            <el-tooltip :disabled="slotPhase(row) === 'upcoming'" :content="phaseHint(row)" placement="top">
-              <el-tag :type="displayStatus(row) === '开放' ? 'success' : 'info'" effect="plain" round>
-                {{ displayStatus(row) }}
-              </el-tag>
-            </el-tooltip>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="210" fixed="right">
+        <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
             <div class="op-actions">
-              <el-button text size="small" @click="openEdit(row)">编辑</el-button>
+              <el-button text size="small" :disabled="!isEditable(row)" @click="openEdit(row)">编辑</el-button>
               <el-button
                 text
                 size="small"
-                :disabled="slotPhase(row) !== 'upcoming'"
+                :disabled="!isEditable(row)"
                 @click="toggleStatus(row)"
               >
-                {{ slotPhase(row) !== 'upcoming' ? '已关闭' : row.status === 1 ? '关闭' : '开放' }}
+                {{ isRowClosed(row) ? '闭馆' : slotPhase(row) !== 'upcoming' ? '已关闭' : row.status === 1 ? '关闭' : '开放' }}
               </el-button>
               <el-button text size="small" type="danger" @click="remove(row)">删除</el-button>
             </div>
@@ -337,35 +640,51 @@ onMounted(async () => {
       </div>
     </div>
 
-    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑时段' : '新增时段'" width="600px" destroy-on-close>
+    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑分时批次' : '新增分时批次'" width="600px" destroy-on-close>
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
         <div class="form-cols">
           <el-form-item label="博物馆" prop="museumId">
-            <el-select
-              v-model="form.museumId"
-              placeholder="请选择博物馆"
-              style="width: 100%"
-              @change="form.exhibitionId = undefined"
-            >
-              <el-option v-for="museum in museums" :key="museum.id" :label="museum.name" :value="museum.id" />
+            <el-select v-model="form.museumId" placeholder="请选择博物馆" style="width: 100%">
+              <el-option
+                v-for="museum in museums"
+                :key="museum.id"
+                :label="museum.status === 1 ? museum.name : `${museum.name}（已停用）`"
+                :value="museum.id"
+                :disabled="museum.status !== 1"
+              />
             </el-select>
           </el-form-item>
-          <el-form-item label="关联展览（选填）">
-            <el-select v-model="form.exhibitionId" placeholder="不关联则视为常设展" clearable style="width: 100%">
-              <el-option v-for="item in formExhibitions" :key="item.id" :label="item.name" :value="item.id" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="参观日期" prop="visitDate">
+          <el-form-item v-if="editingId" label="参观日期">
             <el-date-picker
               v-model="form.visitDate"
               type="date"
               value-format="YYYY-MM-DD"
               placeholder="选择日期"
               style="width: 100%"
+              disabled
             />
+          </el-form-item>
+          <el-form-item v-else label="参观日期范围" class="span-2">
+            <el-date-picker
+              v-model="form.dateRange"
+              type="daterange"
+              value-format="YYYY-MM-DD"
+              range-separator="至"
+              start-placeholder="开始日期"
+              end-placeholder="结束日期"
+              :disabled-date="disabledDate"
+              style="width: 100%"
+            />
+            <span v-if="museumDateBounds" class="range-hint">
+              可开设日期：{{ museumDateBounds.start.format('YYYY-MM-DD') }} 至
+              {{ museumDateBounds.end.format('YYYY-MM-DD') }}（该馆展览周期）
+            </span>
           </el-form-item>
           <el-form-item label="总容量" prop="totalCapacity">
             <el-input-number v-model="form.totalCapacity" :min="1" :max="10000" style="width: 100%" />
+            <span v-if="selectedMuseumDailyCapacity" class="range-hint">
+              该馆日容量 {{ selectedMuseumDailyCapacity }}；普通票额度 = 日容量 − 当天分时批次容量之和
+            </span>
           </el-form-item>
           <el-form-item label="开始时间" prop="startTime">
             <el-time-picker
@@ -373,6 +692,8 @@ onMounted(async () => {
               value-format="HH:mm:ss"
               format="HH:mm"
               placeholder="开始时间"
+              :disabled-hours="disabledStartHours"
+              :disabled-minutes="disabledStartMinutes"
               style="width: 100%"
             />
           </el-form-item>
@@ -382,6 +703,8 @@ onMounted(async () => {
               value-format="HH:mm:ss"
               format="HH:mm"
               placeholder="结束时间"
+              :disabled-hours="disabledEndHours"
+              :disabled-minutes="disabledEndMinutes"
               style="width: 100%"
             />
           </el-form-item>
@@ -392,9 +715,12 @@ onMounted(async () => {
             </el-select>
           </el-form-item>
         </div>
+        <p v-if="selectedMuseum" class="range-hint">
+          博物馆开放时间 {{ museumOpenTime }} - {{ museumCloseTime }}，分时批次需在该时间段内。
+        </p>
         <p class="form-tip">
           <el-icon><InfoFilled /></el-icon>
-          编辑已有预约的时段时，不能修改日期、时间或把容量降到已预约人数以下。已开始或已结束的时段会自动置为关闭。
+          新增时可按开始、结束日期一次生成多天分时批次（已存在的日期会自动跳过）；编辑已有预约的分时批次时，不能修改日期、时间或把容量降到已预约人数以下。已开始或已结束的分时批次会自动置为关闭。停用的博物馆不能新增或启用批次；当天分时批次容量之和不能超过日容量。
         </p>
       </el-form>
       <template #footer>
@@ -413,6 +739,10 @@ onMounted(async () => {
   white-space: nowrap;
 }
 
+.op-actions :deep(.el-button) {
+  padding: 0;
+}
+
 .op-actions :deep(.el-button + .el-button) {
   margin-left: 8px;
 }
@@ -426,6 +756,12 @@ onMounted(async () => {
   margin-left: 6px;
   color: var(--muted);
   font-size: 9px;
+}
+
+.date-cell {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
 }
 
 .stat-link {
@@ -464,11 +800,12 @@ onMounted(async () => {
 }
 
 .capacity-cell {
-  padding-right: 22px;
+  padding-right: 8px;
 }
 
 .cap-text {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 4px;
   margin-bottom: 6px;
@@ -483,7 +820,6 @@ onMounted(async () => {
 }
 
 .cap-text span {
-  margin-left: auto;
   color: var(--gold-deep);
   font-size: 9.5px;
 }
@@ -505,10 +841,157 @@ onMounted(async () => {
   border-radius: 999px;
 }
 
+.quota-overview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.quota-card {
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fffdf9;
+  box-shadow: var(--shadow-sm);
+}
+
+.quota-basic {
+  border-color: #e8dcc4;
+  background: linear-gradient(135deg, #fdf8ee, #fffdf9);
+}
+
+.quota-timed {
+  background: linear-gradient(135deg, #f7f9fc, #fffdf9);
+}
+
+.quota-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.quota-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.closed-formula {
+  color: var(--gold-deep);
+}
+
+.closed-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border: 1px solid rgba(176, 138, 79, 0.22);
+  border-radius: 10px;
+  background: rgba(176, 138, 79, 0.08);
+  color: var(--gold-deep);
+  font-size: 12px;
+}
+
+.quota-label {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.quota-value {
+  display: block;
+  margin-top: 12px;
+  color: var(--gold-deep);
+  font-family: var(--font-serif);
+  font-size: 32px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.quota-value small {
+  margin-left: 4px;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.quota-formula {
+  margin-top: 10px;
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.quota-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.quota-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.quota-metric span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.quota-metric strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.quota-metric small {
+  color: var(--gold-deep);
+  font-size: 9.5px;
+}
+
+.quota-progress {
+  margin-top: 10px;
+}
+
+.quota-desc {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.quota-empty {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .form-cols {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0 16px;
+}
+
+.span-2 {
+  grid-column: 1 / -1;
+}
+
+.range-hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--gold-deep);
+  font-size: 10.5px;
+  line-height: 1.6;
 }
 
 .form-tip {
@@ -520,6 +1003,12 @@ onMounted(async () => {
   color: #8b754f;
   font-size: 10.5px;
   line-height: 1.7;
+}
+
+@media (max-width: 720px) {
+  .quota-overview {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 600px) {

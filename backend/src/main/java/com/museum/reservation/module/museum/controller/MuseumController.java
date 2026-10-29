@@ -6,17 +6,20 @@ import com.museum.reservation.module.exhibition.service.ExhibitionService;
 import com.museum.reservation.module.exhibition.vo.ExhibitionVO;
 import com.museum.reservation.module.museum.entity.Museum;
 import com.museum.reservation.module.museum.service.MuseumService;
+import com.museum.reservation.module.museum.vo.BasicQuotaVO;
 import com.museum.reservation.module.ticket.entity.TicketType;
 import com.museum.reservation.module.ticket.service.TicketTypeService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @Tag(name = "博物馆（公开）")
@@ -53,5 +56,13 @@ public class MuseumController {
     @GetMapping("/{id}/ticket-types")
     public ApiResponse<List<TicketType>> ticketTypes(@PathVariable Long id) {
         return ApiResponse.ok(ticketTypeService.publicList(id));
+    }
+
+    @Operation(summary = "普通票额度")
+    @GetMapping("/{id}/basic-quota")
+    public ApiResponse<BasicQuotaVO> basicQuota(@PathVariable Long id,
+                                                @RequestParam
+                                                @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return ApiResponse.ok(museumService.basicQuota(id, date));
     }
 }

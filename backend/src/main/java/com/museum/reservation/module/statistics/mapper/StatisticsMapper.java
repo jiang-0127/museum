@@ -89,14 +89,13 @@ public interface StatisticsMapper {
     List<TicketKindDetailRow> selectTicketDistributionRows();
 
     @Select("""
-            SELECT COALESCE(t.ticket_kind, 'BASIC') AS kind_name,
-                   m.name AS museum_name,
+            SELECT m.name AS museum_name,
                    t.name AS ticket_name,
                    COUNT(r.id) AS value
             FROM ticket_type t
             LEFT JOIN museum m ON m.id = t.museum_id
             LEFT JOIN reservation r ON r.ticket_type_id = t.id AND r.status <> 'CANCELED'
-            GROUP BY COALESCE(t.ticket_kind, 'BASIC'), m.name, t.name
+            GROUP BY m.id, m.name, t.name
             ORDER BY value DESC
             """)
     List<TicketKindDetailRow> selectTicketDistributionDetail();

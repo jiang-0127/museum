@@ -155,7 +155,7 @@ onMounted(load)
                 </span>
                 <span>
                   <el-icon><Clock /></el-icon>
-                  {{ item.startTime.slice(0, 5) }} - {{ item.endTime.slice(0, 5) }}
+                  {{ item.startTime && item.endTime ? `${item.startTime.slice(0, 5)} - ${item.endTime.slice(0, 5)}` : '开放时间内任意时间' }}
                 </span>
                 <span>
                   <el-icon><User /></el-icon>

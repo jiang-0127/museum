@@ -53,8 +53,10 @@ async function copyCode() {
             <strong class="serif">{{ dateText }}</strong>
           </div>
           <div>
-            <span>入场时段</span>
-            <strong class="serif">{{ ticket.startTime.slice(0, 5) }} - {{ ticket.endTime.slice(0, 5) }}</strong>
+            <span>入场方式</span>
+            <strong class="serif">
+              {{ ticket.startTime && ticket.endTime ? `${ticket.startTime.slice(0, 5)} - ${ticket.endTime.slice(0, 5)}` : '开放时间内任意时间' }}
+            </strong>
           </div>
           <div>
             <span>参观人数</span>

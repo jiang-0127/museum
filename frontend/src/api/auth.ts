@@ -1,4 +1,4 @@
-import { get, post, put } from './http'
+ import { get, post, put } from './http'
 import type { LoginResult, User } from '@/types'
 
 export const loginApi = (data: { username: string; password: string }) =>

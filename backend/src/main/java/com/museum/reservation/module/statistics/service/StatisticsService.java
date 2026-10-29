@@ -86,32 +86,27 @@ public class StatisticsService {
     }
 
     public List<TicketDistributionVO> ticketDistributionDetail() {
-        Map<String, TicketDistributionVO> kindMap = new LinkedHashMap<>();
+        Map<String, TicketDistributionVO> museumMap = new LinkedHashMap<>();
         for (TicketKindDetailRow row : statisticsMapper.selectTicketDistributionDetail()) {
-            String label = kindLabel(row.getKindName());
-            TicketDistributionVO kind = kindMap.computeIfAbsent(label, name -> {
+            String museumName = row.getMuseumName() == null || row.getMuseumName().isBlank()
+                    ? "未知博物馆" : row.getMuseumName();
+            TicketDistributionVO museum = museumMap.computeIfAbsent(museumName, name -> {
                 TicketDistributionVO vo = new TicketDistributionVO();
                 vo.setName(name);
                 vo.setValue(0);
                 vo.setChildren(new ArrayList<>());
                 return vo;
             });
-            kind.setValue(kind.getValue() + row.getValue());
+            museum.setValue(museum.getValue() + row.getValue());
             NameValue child = new NameValue();
-            child.setName(buildTicketLabel(row));
+            child.setName(row.getTicketName() == null || row.getTicketName().isBlank()
+                    ? "未知票种" : row.getTicketName());
             child.setValue(row.getValue());
-            kind.getChildren().add(child);
+            museum.getChildren().add(child);
         }
-        return new ArrayList<>(kindMap.values());
-    }
-
-    private String buildTicketLabel(TicketKindDetailRow row) {
-        String museumName = row.getMuseumName();
-        String ticketName = row.getTicketName();
-        if (museumName == null || museumName.isBlank()) {
-            return ticketName;
-        }
-        return museumName + " · " + ticketName;
+        List<TicketDistributionVO> result = new ArrayList<>(museumMap.values());
+        result.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
+        return result;
     }
 
     private String kindLabel(String kind) {

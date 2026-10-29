@@ -10,6 +10,7 @@ import {
   updateMuseum,
 } from '@/api/admin'
 import type { Museum } from '@/types'
+import { formatClosedDays, parseClosedDays } from '@/utils/schedule'
 
 const rows = ref<Museum[]>([])
 const total = ref(0)
@@ -21,6 +22,7 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const saving = ref(false)
 const editingId = ref<number | null>(null)
+const editingWasEnabled = ref(false)
 const formRef = ref<FormInstance>()
 
 const emptyForm = () => ({
@@ -29,6 +31,8 @@ const emptyForm = () => ({
   description: '',
   openTime: '09:00',
   closeTime: '17:00',
+  closedDays: [] as number[],
+  dailyCapacity: 1200,
   phone: '',
   coverUrl: '',
   status: 1,
@@ -36,6 +40,16 @@ const emptyForm = () => ({
 })
 
 const form = reactive(emptyForm())
+
+const weekDays = [
+  { value: 1, label: '周一' },
+  { value: 2, label: '周二' },
+  { value: 3, label: '周三' },
+  { value: 4, label: '周四' },
+  { value: 5, label: '周五' },
+  { value: 6, label: '周六' },
+  { value: 7, label: '周日' },
+]
 
 const rules: FormRules = {
   name: [{ required: true, message: '请输入博物馆名称', trigger: 'blur' }],
@@ -67,18 +81,22 @@ function search() {
 
 function openCreate() {
   editingId.value = null
+  editingWasEnabled.value = false
   Object.assign(form, emptyForm())
   dialogVisible.value = true
 }
 
 function openEdit(row: Museum) {
   editingId.value = row.id
+  editingWasEnabled.value = row.status === 1
   Object.assign(form, {
     name: row.name,
     address: row.address,
     description: row.description || '',
     openTime: row.openTime || '09:00',
     closeTime: row.closeTime || '17:00',
+    closedDays: parseClosedDays(row.closedDays),
+    dailyCapacity: row.dailyCapacity ?? 1200,
     phone: row.phone || '',
     coverUrl: row.coverUrl || '',
     status: row.status,
@@ -90,13 +108,26 @@ function openEdit(row: Museum) {
 async function save() {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
+  if (!form.openTime || !form.closeTime || form.openTime >= form.closeTime) {
+    ElMessage.warning('闭馆时间必须晚于开放时间')
+    return
+  }
+  if (form.closedDays.length >= 7) {
+    ElMessage.warning('每周至少保留一天开放')
+    return
+  }
   saving.value = true
+  const payload = { ...form, closedDays: form.closedDays.join(',') }
   try {
     if (editingId.value) {
-      await updateMuseum(editingId.value, { ...form })
-      ElMessage.success('博物馆信息已更新')
+      await updateMuseum(editingId.value, payload)
+      if (editingWasEnabled.value && form.status === 0) {
+        ElMessage.success('已更新，并级联停用该馆展览、票种与未来批次')
+      } else {
+        ElMessage.success('博物馆信息已更新')
+      }
     } else {
-      await createMuseum({ ...form })
+      await createMuseum(payload)
       ElMessage.success('博物馆已创建')
     }
     dialogVisible.value = false
@@ -108,11 +139,15 @@ async function save() {
 
 async function remove(row: Museum) {
   try {
-    await ElMessageBox.confirm(`确认删除「${row.name}」吗？相关展览与时段需先处理。`, '删除博物馆', {
-      type: 'warning',
-      confirmButtonText: '确认删除',
-      cancelButtonText: '取消',
-    })
+    await ElMessageBox.confirm(
+      `确认删除「${row.name}」吗？存在有效预约时不能删除。`,
+      '删除博物馆',
+      {
+        type: 'warning',
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+      },
+    )
     await deleteMuseum(row.id)
     ElMessage.success('已删除')
     load()
@@ -122,9 +157,29 @@ async function remove(row: Museum) {
 }
 
 async function toggleStatus(row: Museum) {
+  const nextStatus = row.status === 1 ? 0 : 1
+  if (nextStatus === 0) {
+    try {
+      await ElMessageBox.confirm(
+        `停用「${row.name}」将同时停用其全部展览、票种与未来入馆批次，确认停用吗？`,
+        '停用博物馆',
+        {
+          type: 'warning',
+          confirmButtonText: '确认停用',
+          cancelButtonText: '取消',
+        },
+      )
+    } catch {
+      return
+    }
+  }
   try {
-    await updateMuseum(row.id, { ...row, status: row.status === 1 ? 0 : 1 })
-    ElMessage.success(row.status === 1 ? '已停用该博物馆' : '已启用该博物馆')
+    await updateMuseum(row.id, { ...row, status: nextStatus })
+    ElMessage.success(
+      nextStatus === 0
+        ? '已停用，并级联停用其展览、票种与未来批次'
+        : '已启用该博物馆（展览、票种与批次需按需单独启用）',
+    )
     load()
   } catch {
     // 错误已提示
@@ -144,7 +199,7 @@ onMounted(load)
     <PageHeader
       eyebrow="MUSEUM MANAGEMENT"
       title="博物馆管理"
-      desc="维护博物馆基本信息、开放时间与展示状态。停用后游客端不再展示。"
+      desc="维护博物馆基本信息、开放时间与展示状态。停用后记录保留并显示为停用；删除后不再展示。停用或删除都会级联处理该馆展览、票种与入馆批次。"
     >
       <el-button type="primary" @click="openCreate">
         <el-icon><Plus /></el-icon>
@@ -168,7 +223,7 @@ onMounted(load)
 
     <div class="table-card">
       <el-table v-loading="loading" :data="rows" row-key="id">
-        <el-table-column label="博物馆" min-width="230">
+        <el-table-column label="博物馆" min-width="200">
           <template #default="{ row }">
             <div class="museum-cell">
               <div class="thumb">
@@ -182,11 +237,14 @@ onMounted(load)
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="开放时间" width="150">
+        <el-table-column label="开放时间" width="130">
           <template #default="{ row }">{{ row.openTime }} - {{ row.closeTime }}</template>
         </el-table-column>
-        <el-table-column prop="phone" label="联系电话" width="140" />
-        <el-table-column prop="sort" label="排序" width="80" align="center" />
+        <el-table-column label="每周闭馆日" width="110">
+          <template #default="{ row }">{{ formatClosedDays(row.closedDays) }}</template>
+        </el-table-column>
+        <el-table-column prop="phone" label="联系电话" width="120" />
+        <el-table-column prop="sort" label="排序" width="70" align="center" />
         <el-table-column label="状态" width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="row.status === 1 ? 'success' : 'info'" effect="plain" round>
@@ -231,10 +289,26 @@ onMounted(load)
             <el-input v-model="form.phone" placeholder="选填" />
           </el-form-item>
           <el-form-item label="开放时间" prop="openTime">
-            <el-input v-model="form.openTime" placeholder="08:30" />
+            <el-time-picker
+              v-model="form.openTime"
+              value-format="HH:mm"
+              format="HH:mm"
+              placeholder="09:00"
+              style="width: 100%"
+            />
           </el-form-item>
           <el-form-item label="闭馆时间" prop="closeTime">
-            <el-input v-model="form.closeTime" placeholder="17:00" />
+            <el-time-picker
+              v-model="form.closeTime"
+              value-format="HH:mm"
+              format="HH:mm"
+              placeholder="17:00"
+              style="width: 100%"
+            />
+          </el-form-item>
+          <el-form-item label="日容量（人/天）">
+            <el-input-number v-model="form.dailyCapacity" :min="1" :max="100000" controls-position="right" style="width: 100%" />
+            <span class="field-hint">普通票额度 = 日容量 − 当天各入馆批次额定容量之和</span>
           </el-form-item>
           <el-form-item label="排序">
             <el-input-number v-model="form.sort" :min="0" :max="9999" controls-position="right" style="width: 100%" />
@@ -246,6 +320,14 @@ onMounted(load)
             </el-select>
           </el-form-item>
         </div>
+        <el-form-item label="每周闭馆日">
+          <el-checkbox-group v-model="form.closedDays">
+            <el-checkbox-button v-for="day in weekDays" :key="day.value" :value="day.value">
+              {{ day.label }}
+            </el-checkbox-button>
+          </el-checkbox-group>
+          <span class="field-hint">闭馆日当天不开放预约，已有批次会显示为关闭且不可修改状态。</span>
+        </el-form-item>
         <el-form-item label="地址" prop="address">
           <el-input v-model="form.address" placeholder="请输入详细地址" />
         </el-form-item>
@@ -316,6 +398,14 @@ onMounted(load)
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0 16px;
+}
+
+.field-hint {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.5;
 }
 
 @media (max-width: 600px) {

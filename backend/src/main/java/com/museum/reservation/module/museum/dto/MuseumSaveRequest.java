@@ -15,6 +15,8 @@ public class MuseumSaveRequest {
     private String description;
     private String openTime;
     private String closeTime;
+    private String closedDays;
+    private Integer dailyCapacity = 1200;
     private String phone;
     private String coverUrl;
     private Integer status = 1;

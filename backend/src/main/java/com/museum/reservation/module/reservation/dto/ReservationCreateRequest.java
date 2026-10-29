@@ -7,13 +7,15 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @Data
 public class ReservationCreateRequest {
 
-    @NotNull(message = "请选择参观时段")
     private Long slotId;
+
+    private LocalDate visitDate;
 
     @NotNull(message = "请选择票种")
     private Long ticketTypeId;

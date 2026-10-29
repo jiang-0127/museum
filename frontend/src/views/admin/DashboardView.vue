@@ -177,83 +177,82 @@ const heatOption = computed<EChartsOption>(() => ({
   ],
 }))
 
-const ticketKindOrder = ['普通预约票', '单展票', '全馆联票']
+type MuseumPieItem = {
+  name: string
+  total: number
+  option: EChartsOption
+}
 
-const distributionData = computed(() => {
-  const map = new Map(distribution.value.map((item) => [item.name, item]))
-  return ticketKindOrder.map((name) => {
-    const found = map.get(name)
-    return {
-      name,
-      value: Number(found?.value) || 0,
-      children: (found?.children ?? []).filter((child) => child.value > 0),
-    }
-  })
-})
+const museumPies = computed<MuseumPieItem[]>(() =>
+  distribution.value
+    .map((museum) => {
+      const items = (museum.children ?? [])
+        .map((child) => ({ name: child.name, value: Number(child.value) || 0 }))
+        .filter((child) => child.value > 0)
+        .sort((a, b) => b.value - a.value)
+      const total = items.reduce((sum, item) => sum + item.value, 0)
+      return {
+        name: museum.name,
+        total,
+        option: buildMuseumPieOption(museum.name, items, total),
+      }
+    })
+    .filter((museum) => museum.total > 0),
+)
 
-const pieOption = computed<EChartsOption>(() => {
-  const data = distributionData.value
-  const total = data.reduce((sum, item) => sum + item.value, 0)
+function buildMuseumPieOption(
+  museumName: string,
+  items: Array<{ name: string; value: number }>,
+  total: number,
+): EChartsOption {
+  const truncate = (name: string) => (name.length > 14 ? `${name.slice(0, 14)}…` : name)
   return {
     tooltip: {
       trigger: 'item',
       backgroundColor: '#172033',
       borderWidth: 0,
-      padding: [10, 14],
+      padding: [8, 12],
       textStyle: { color: '#f7f3eb', fontSize: 11 },
       formatter: (params: unknown) => {
-        const item = params as {
-          name: string
-          value: number
-          percent?: number
-          data?: { children?: NameValue[] }
-        }
+        const item = params as { name: string; value: number; percent?: number }
         const percent =
           item.percent != null
             ? item.percent.toFixed(1)
             : total
               ? ((item.value / total) * 100).toFixed(1)
               : '0.0'
-        const head = `${item.name}<br/>数量：${item.value} 单<br/>比例：${percent}%`
-        const children = item.data?.children ?? []
-        if (!children.length) {
-          return head
-        }
-        const detail = children
-          .map((child) => `${child.name}：${child.value} 单`)
-          .join('<br/>')
-        return `${head}<br/><span style="display:inline-block;margin-top:4px;color:#a9b0bd">具体票种</span><br/>${detail}`
+        return `${museumName}<br/>${item.name}<br/>数量：${item.value} 单<br/>占比：${percent}%`
       },
     },
     legend: {
       bottom: 0,
       left: 'center',
-      itemWidth: 9,
-      itemHeight: 9,
-      textStyle: { color: '#8a8377', fontSize: 10 },
-      data: ticketKindOrder,
+      type: 'scroll',
+      itemWidth: 8,
+      itemHeight: 8,
+      pageIconColor: '#b08a4f',
+      pageIconInactiveColor: '#d8d1c5',
+      pageTextStyle: { color: '#8a8377', fontSize: 9 },
+      textStyle: { color: '#8a8377', fontSize: 9 },
+      formatter: truncate,
     },
-    color: ['#b08a4f', '#3f7a5c', '#4b6b9a'],
+    color: ['#b08a4f', '#3f7a5c', '#4b6b9a', '#c28a3e', '#8a6f9e', '#5a8a8a', '#a86f6f'],
     series: [
       {
-        name: '票种分布',
+        name: museumName,
         type: 'pie',
-        radius: ['48%', '70%'],
-        center: ['50%', '43%'],
+        radius: ['40%', '62%'],
+        center: ['50%', '42%'],
         avoidLabelOverlap: true,
-        itemStyle: { borderColor: '#fffdf9', borderWidth: 3 },
+        itemStyle: { borderColor: '#fffdf9', borderWidth: 2 },
         label: { show: false },
         labelLine: { show: false },
-        emphasis: {
-          scale: true,
-          scaleSize: 6,
-          label: { show: false },
-        },
-        data,
+        emphasis: { scale: true, scaleSize: 5, label: { show: false } },
+        data: items,
       },
     ],
   }
-})
+}
 
 async function load() {
   loading.value = true
@@ -395,15 +394,6 @@ onMounted(load)
         </div>
         <ChartPanel :option="heatOption" :height="280" />
       </div>
-      <div class="admin-card">
-        <div class="table-head">
-          <div>
-            <h3>票种分布</h3>
-            <small>全部预约订单</small>
-          </div>
-        </div>
-        <ChartPanel :option="pieOption" :height="280" />
-      </div>
       <div class="admin-card saturation-card">
         <div class="table-head">
           <div>
@@ -433,6 +423,25 @@ onMounted(load)
           </div>
           <el-empty v-if="!saturation.length" description="暂无时段数据" :image-size="50" />
         </div>
+      </div>
+      <div class="admin-card ticket-distribution-card">
+        <div class="table-head">
+          <div>
+            <h3>票种分布</h3>
+            <small>按博物馆拆分，每个展馆单独展示各票种预约占比</small>
+          </div>
+          <span class="total-note">共 {{ museumPies.length }} 个展馆有预约</span>
+        </div>
+        <div v-if="museumPies.length" class="ticket-museum-grid">
+          <div v-for="museum in museumPies" :key="museum.name" class="ticket-museum-item">
+            <div class="ticket-museum-head">
+              <strong>{{ museum.name }}</strong>
+              <span>共 {{ museum.total }} 单</span>
+            </div>
+            <ChartPanel :option="museum.option" :height="220" />
+          </div>
+        </div>
+        <el-empty v-else description="暂无票种预约数据" :image-size="64" />
       </div>
     </div>
   </div>
@@ -519,7 +528,50 @@ onMounted(load)
 }
 
 .chart-grid.lower {
-  grid-template-columns: 1fr 1fr 1.15fr;
+  grid-template-columns: 1fr 1fr;
+}
+
+.ticket-distribution-card {
+  grid-column: 1 / -1;
+}
+
+.ticket-museum-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+@media (min-width: 1000px) {
+  .ticket-museum-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.ticket-museum-item {
+  min-width: 0;
+  padding: 10px 12px 0;
+  border: 1px solid rgba(23, 32, 51, 0.07);
+  border-radius: 12px;
+  background: rgba(255, 253, 249, 0.7);
+}
+
+.ticket-museum-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.ticket-museum-head strong {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ticket-museum-head span {
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .trend-card {
@@ -682,6 +734,10 @@ onMounted(load)
 @media (max-width: 560px) {
   .kpi-grid,
   .chart-grid.lower {
+    grid-template-columns: 1fr;
+  }
+
+  .ticket-museum-grid {
     grid-template-columns: 1fr;
   }
 }

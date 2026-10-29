@@ -123,7 +123,7 @@ onMounted(load)
             <p>{{ statusText[order.status] || '订单状态已更新' }}</p>
             <div class="hero-meta">
               <span><el-icon><Calendar /></el-icon>{{ dayjs(order.visitDate).format('YYYY 年 MM 月 DD 日') }}（{{ weekday(order.visitDate) }}）</span>
-              <span><el-icon><Clock /></el-icon>{{ order.startTime.slice(0, 5) }} - {{ order.endTime.slice(0, 5) }}</span>
+              <span><el-icon><Clock /></el-icon>{{ order.startTime && order.endTime ? `${order.startTime.slice(0, 5)} - ${order.endTime.slice(0, 5)}` : '开放时间内任意时间' }}</span>
               <span><el-icon><User /></el-icon>{{ order.visitorCount }} 位参观者</span>
             </div>
           </div>
@@ -157,8 +157,8 @@ onMounted(load)
                   <strong>{{ dayjs(order.visitDate).format('YYYY-MM-DD') }}（{{ weekday(order.visitDate) }}）</strong>
                 </div>
                 <div>
-                  <span>入场时段</span>
-                  <strong>{{ order.startTime.slice(0, 5) }} - {{ order.endTime.slice(0, 5) }}</strong>
+                  <span>入场方式</span>
+                  <strong>{{ order.startTime && order.endTime ? `${order.startTime.slice(0, 5)} - ${order.endTime.slice(0, 5)}` : '开放时间内任意时间' }}</strong>
                 </div>
                 <div>
                   <span>票种</span>

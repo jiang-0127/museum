@@ -3,11 +3,12 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import dayjs from 'dayjs'
-import { getMuseum, getMuseumExhibitions, getMuseumTicketTypes, getSlot, getSiteSummary } from '@/api/public'
+import { getBasicQuota, getMuseum, getMuseumExhibitions, getMuseumTicketTypes, getSlot, getSiteSummary } from '@/api/public'
 import { createReservation, mockPay } from '@/api/reservation'
 import { useAuthStore } from '@/stores/auth'
 import { audienceLabels, defaultVariant, groupTickets, ticketAudience, type TicketGroup } from '@/utils/ticket'
-import type { Exhibition, Museum, ReservationDetail, Slot, TicketType } from '@/types'
+import { isClosedOn } from '@/utils/schedule'
+import type { Exhibition, Museum, ReservationCreatePayload, ReservationDetail, Slot, TicketType } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,6 +26,9 @@ const agreed = ref(false)
 const payDialog = ref(false)
 const paying = ref(false)
 const createdOrder = ref<ReservationDetail | null>(null)
+const basicMode = ref(false)
+const visitDate = ref('')
+const basicQuota = ref(0)
 
 const contactFormRef = ref<FormInstance>()
 const contact = reactive({
@@ -85,13 +89,15 @@ const totalAmount = computed(() => {
 })
 
 const formattedDate = computed(() => {
-  if (!slot.value) return ''
-  return dayjs(slot.value.visitDate).format('YYYY 年 MM 月 DD 日')
+  const value = slot.value?.visitDate || visitDate.value
+  if (!value) return ''
+  return dayjs(value).format('YYYY 年 MM 月 DD 日')
 })
 
 const weekday = computed(() => {
-  if (!slot.value) return ''
-  return ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][dayjs(slot.value.visitDate).day()]
+  const value = slot.value?.visitDate || visitDate.value
+  if (!value) return ''
+  return ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][dayjs(value).day()]
 })
 
 function isSlotPast(value: Slot) {
@@ -108,7 +114,16 @@ function splitLines(value?: string) {
 }
 
 function changeSlot() {
-  if (!museum.value || !slot.value) return
+  if (!museum.value) return
+  if (basicMode.value) {
+    router.push({
+      path: `/museums/${museum.value.id}`,
+      query: { date: visitDate.value },
+      hash: '#booking',
+    })
+    return
+  }
+  if (!slot.value) return
   router.push({
     path: `/museums/${museum.value.id}`,
     query: { date: slot.value.visitDate },
@@ -164,16 +179,35 @@ function validateVisitors() {
     }
     ids.add(normalized)
   }
-  if (slot.value && visitors.value.length > slot.value.remaining) {
-    ElMessage.warning(`该时段仅剩 ${slot.value.remaining} 张余票`)
+  if (!basicMode.value && slot.value && visitors.value.length > slot.value.remaining) {
+    ElMessage.warning(`该批次仅剩 ${slot.value.remaining} 张余票`)
+    return false
+  }
+  if (basicMode.value && visitors.value.length > basicQuota.value) {
+    ElMessage.warning(`该日期普通预约票仅剩 ${basicQuota.value} 张`)
     return false
   }
   return true
 }
 
+function isVisitClosed() {
+  const target = basicMode.value ? visitDate.value : slot.value?.visitDate
+  if (!museum.value || !target) return false
+  return isClosedOn(museum.value.closedDays, target)
+}
+
 async function nextStep() {
-  if (slot.value && isSlotPast(slot.value)) {
-    ElMessage.warning('该参观时段已过，请重新选择日期与时段')
+  if (isVisitClosed()) {
+    ElMessage.warning('该日期为博物馆闭馆日，暂不可预约')
+    return
+  }
+  if (!basicMode.value && slot.value && isSlotPast(slot.value)) {
+    ElMessage.warning('该入馆批次已过，请重新选择日期与批次')
+    changeSlot()
+    return
+  }
+  if (basicMode.value && dayjs(visitDate.value).isBefore(dayjs(), 'day')) {
+    ElMessage.warning('参观日期已过，请重新选择日期')
     changeSlot()
     return
   }
@@ -197,9 +231,19 @@ function prevStep() {
 }
 
 async function submit() {
-  if (!slot.value || !ticketTypeId.value || !selectedTicket.value) return
-  if (isSlotPast(slot.value)) {
-    ElMessage.warning('该参观时段已过，请重新选择日期与时段')
+  if (!ticketTypeId.value || !selectedTicket.value) return
+  if (!basicMode.value && !slot.value) return
+  if (isVisitClosed()) {
+    ElMessage.warning('该日期为博物馆闭馆日，暂不可预约')
+    return
+  }
+  if (!basicMode.value && slot.value && isSlotPast(slot.value)) {
+    ElMessage.warning('该入馆批次已过，请重新选择日期与批次')
+    changeSlot()
+    return
+  }
+  if (basicMode.value && dayjs(visitDate.value).isBefore(dayjs(), 'day')) {
+    ElMessage.warning('参观日期已过，请重新选择日期')
     changeSlot()
     return
   }
@@ -209,8 +253,7 @@ async function submit() {
   }
   submitting.value = true
   try {
-    const order = await createReservation({
-      slotId: slot.value.id,
+    const payload: ReservationCreatePayload = {
       ticketTypeId: ticketTypeId.value,
       contactName: contact.name,
       contactPhone: contact.phone,
@@ -220,7 +263,13 @@ async function submit() {
         phone: visitor.phone || undefined,
       })),
       remark: remark.value || undefined,
-    })
+    }
+    if (slot.value) {
+      payload.slotId = slot.value.id
+    } else {
+      payload.visitDate = visitDate.value
+    }
+    const order = await createReservation(payload)
     createdOrder.value = order
     if (order.status === 'PENDING_PAYMENT') {
       payDialog.value = true
@@ -257,33 +306,56 @@ async function load() {
   loading.value = true
   try {
     const slotId = route.query.slotId as string | undefined
-    if (!slotId) {
-      ElMessage.info('请先从博物馆页面选择参观时段')
+    const museumParam = route.query.museumId as string | undefined
+
+    if (!slotId && museumParam) {
+      basicMode.value = true
+      visitDate.value = (route.query.date as string) || dayjs().format('YYYY-MM-DD')
+      const [museumData, ticketData, exhibitionData, summary, quotaData] = await Promise.all([
+        getMuseum(museumParam),
+        getMuseumTicketTypes(museumParam),
+        getMuseumExhibitions(museumParam),
+        getSiteSummary(),
+        getBasicQuota(museumParam, visitDate.value),
+      ])
+      museum.value = museumData
+      exhibitions.value = exhibitionData
+      maxVisitors.value = summary.maxVisitorsPerOrder || 6
+      tickets.value = ticketData.filter((ticket) => (ticket.ticketKind || 'BASIC') === 'BASIC')
+      basicQuota.value = quotaData.basicRemaining
+      const preferredId = route.query.ticketTypeId ? Number(route.query.ticketTypeId) : null
+      ticketTypeId.value =
+        preferredId && tickets.value.some((ticket) => ticket.id === preferredId)
+          ? preferredId
+          : tickets.value[0]?.id || null
+    } else if (slotId) {
+      const slotData = await getSlot(slotId)
+      if (isSlotPast(slotData)) {
+        ElMessage.warning('该入馆批次已过，请重新选择日期与批次')
+        router.replace({
+          path: `/museums/${slotData.museumId}`,
+          query: { date: slotData.visitDate },
+          hash: '#booking',
+        })
+        return
+      }
+      slot.value = slotData
+      const [museumData, ticketData, exhibitionData, summary] = await Promise.all([
+        getMuseum(slotData.museumId),
+        getMuseumTicketTypes(slotData.museumId),
+        getMuseumExhibitions(slotData.museumId),
+        getSiteSummary(),
+      ])
+      museum.value = museumData
+      tickets.value = ticketData.filter((ticket) => (ticket.ticketKind || 'BASIC') !== 'BASIC')
+      exhibitions.value = exhibitionData
+      ticketTypeId.value = tickets.value[0]?.id || null
+      maxVisitors.value = summary.maxVisitorsPerOrder || 6
+    } else {
+      ElMessage.info('请先从博物馆页面选择入馆方式')
       router.replace('/museums')
       return
     }
-    const slotData = await getSlot(slotId)
-    if (isSlotPast(slotData)) {
-      ElMessage.warning('该参观时段已过，请重新选择日期与时段')
-      router.replace({
-        path: `/museums/${slotData.museumId}`,
-        query: { date: slotData.visitDate },
-        hash: '#booking',
-      })
-      return
-    }
-    slot.value = slotData
-    const [museumData, ticketData, exhibitionData, summary] = await Promise.all([
-      getMuseum(slotData.museumId),
-      getMuseumTicketTypes(slotData.museumId),
-      getMuseumExhibitions(slotData.museumId),
-      getSiteSummary(),
-    ])
-    museum.value = museumData
-    tickets.value = ticketData
-    exhibitions.value = exhibitionData
-    ticketTypeId.value = ticketData[0]?.id || null
-    maxVisitors.value = summary.maxVisitorsPerOrder || 6
 
     contact.name = auth.user?.realName || ''
     contact.phone = auth.user?.phone || ''
@@ -308,7 +380,7 @@ onMounted(load)
       <div v-if="loading" class="loading-box">
         <el-skeleton :rows="8" animated />
       </div>
-      <template v-else-if="slot && museum">
+      <template v-else-if="museum && (slot || basicMode)">
         <div class="booking-head">
           <div class="booking-head-actions">
             <router-link :to="`/museums/${museum.id}`" class="back-link">
@@ -317,7 +389,7 @@ onMounted(load)
             </router-link>
             <el-button plain @click="changeSlot">
               <el-icon><Calendar /></el-icon>
-              更换日期与时段
+              {{ basicMode ? '更换参观日期' : '更换日期与批次' }}
             </el-button>
           </div>
           <span class="eyebrow">RESERVATION</span>
@@ -471,7 +543,7 @@ onMounted(load)
                   <span class="step-index">03</span>
                   <div>
                     <h2 class="serif">确认预约信息</h2>
-                    <p>请核对参观日期、时段与实名信息，提交后将占用票额。</p>
+                    <p>请核对参观日期、入馆方式与实名信息，提交后将占用票额。</p>
                   </div>
                 </div>
 
@@ -484,9 +556,13 @@ onMounted(load)
                     <span>参观日期</span>
                     <strong>{{ formattedDate }}（{{ weekday }}）</strong>
                   </div>
-                  <div class="confirm-block">
-                    <span>参观时段</span>
-                    <strong>{{ slot.startTime.slice(0, 5) }} - {{ slot.endTime.slice(0, 5) }}</strong>
+                  <div v-if="slot" class="confirm-block">
+                    <span>入馆批次</span>
+                    <strong>{{ slot.startTime?.slice(0, 5) }} - {{ slot.endTime?.slice(0, 5) }}</strong>
+                  </div>
+                  <div v-else class="confirm-block">
+                    <span>入馆方式</span>
+                    <strong>开放时间内任意时间入馆</strong>
                   </div>
                   <div class="confirm-block">
                     <span>票种</span>
@@ -511,7 +587,7 @@ onMounted(load)
                 </div>
 
                 <el-checkbox v-model="agreed" class="agree-check">
-                  我已阅读并同意《预约须知》，承诺所填信息真实有效，并按预约时段到馆参观。
+                  我已阅读并同意《预约须知》，承诺所填信息真实有效，并按{{ basicMode ? '预约日期与开放时间' : '预约批次时段' }}到馆参观。
                 </el-checkbox>
               </div>
 
@@ -538,9 +614,13 @@ onMounted(load)
                 <strong>{{ formattedDate }}</strong>
               </div>
               <div class="summary-row">
-                <span>参观时段</span>
-                <strong class="summary-slot">
-                  {{ slot.startTime.slice(0, 5) }} - {{ slot.endTime.slice(0, 5) }}
+                <span>{{ slot ? '入馆批次' : '入馆方式' }}</span>
+                <strong v-if="slot" class="summary-slot">
+                  {{ slot.startTime?.slice(0, 5) }} - {{ slot.endTime?.slice(0, 5) }}
+                  <button class="change-inline" @click="changeSlot">更换</button>
+                </strong>
+                <strong v-else class="summary-slot">
+                  开放时间内任意时间
                   <button class="change-inline" @click="changeSlot">更换</button>
                 </strong>
               </div>
@@ -553,8 +633,9 @@ onMounted(load)
                 <strong>{{ visitors.length }} 人</strong>
               </div>
               <div class="summary-row">
-                <span>余票</span>
-                <strong :class="{ low: slot.remaining < 20 }">{{ slot.remaining }} 张</strong>
+                <span>{{ slot ? '余票' : '普通票额度' }}</span>
+                <strong v-if="slot" :class="{ low: slot.remaining < 20 }">{{ slot.remaining }} 张</strong>
+                <strong v-else :class="{ low: basicQuota < 20 }">{{ basicQuota }} 张</strong>
               </div>
               <div class="summary-total">
                 <span>应付金额</span>

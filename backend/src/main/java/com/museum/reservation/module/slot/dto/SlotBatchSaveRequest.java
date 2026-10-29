@@ -1,0 +1,33 @@
+package com.museum.reservation.module.slot.dto;
+
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
+import lombok.Data;
+
+import java.time.LocalDate;
+import java.time.LocalTime;
+
+@Data
+public class SlotBatchSaveRequest {
+
+    @NotNull(message = "请选择博物馆")
+    private Long museumId;
+
+    @NotNull(message = "请选择开始日期")
+    private LocalDate startDate;
+
+    @NotNull(message = "请选择结束日期")
+    private LocalDate endDate;
+
+    @NotNull(message = "请选择开始时间")
+    private LocalTime startTime;
+
+    @NotNull(message = "请选择结束时间")
+    private LocalTime endTime;
+
+    @NotNull(message = "请输入总容量")
+    @Min(value = 1, message = "总容量至少为 1")
+    private Integer totalCapacity;
+
+    private Integer status = 1;
+}

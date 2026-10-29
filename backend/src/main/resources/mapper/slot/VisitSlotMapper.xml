@@ -24,6 +24,7 @@
             <if test="fromDate != null">AND s.visit_date &gt;= #{fromDate}</if>
             <if test="status != null">AND s.status = #{status}</if>
             <if test="!includePast">AND s.visit_date &gt;= CURDATE()</if>
+            AND s.status &lt;&gt; 2
         </where>
         ORDER BY s.visit_date ASC, s.start_time ASC
     </select>
@@ -38,6 +39,7 @@
             <if test="fromDate != null">AND s.visit_date &gt;= #{fromDate}</if>
             <if test="status != null">AND s.status = #{status}</if>
             <if test="!includePast">AND s.visit_date &gt;= CURDATE()</if>
+            AND s.status &lt;&gt; 2
         </where>
         ORDER BY s.visit_date ASC, s.start_time ASC
     </select>

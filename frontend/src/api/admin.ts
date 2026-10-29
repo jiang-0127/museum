@@ -39,6 +39,8 @@ export const deleteExhibition = (id: number) => del<void>(`/admin/exhibitions/${
 export const adminSlots = (params?: Record<string, unknown>) =>
   get<PageResult<Slot>>('/admin/slots', params)
 export const createSlot = (data: Record<string, unknown>) => post<Slot>('/admin/slots', data)
+export const createSlotBatch = (data: Record<string, unknown>) =>
+  post<number>('/admin/slots/batch', data)
 export const updateSlot = (id: number, data: Record<string, unknown>) =>
   put<Slot>(`/admin/slots/${id}`, data)
 export const deleteSlot = (id: number) => del<void>(`/admin/slots/${id}`)

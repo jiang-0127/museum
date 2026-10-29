@@ -166,16 +166,45 @@ async function save() {
 
 async function remove(row: TicketType) {
   try {
-    await ElMessageBox.confirm(`确认删除票种「${row.name}」吗？已有预约的票种不能删除。`, '删除票种', {
-      type: 'warning',
-      confirmButtonText: '确认删除',
-      cancelButtonText: '取消',
-    })
+    await ElMessageBox.confirm(
+      `确认删除票种「${row.name}」吗？存在有效预约时不能删除，普通预约票只能停用。`,
+      '删除票种',
+      {
+        type: 'warning',
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+      },
+    )
     await deleteTicketType(row.id)
     ElMessage.success('已删除')
     load()
   } catch {
-    // 取消
+    // 取消或后端拒绝
+  }
+}
+
+async function toggleStatus(row: TicketType) {
+  const nextStatus = row.status === 1 ? 0 : 1
+  try {
+    await updateTicketType(row.id, {
+      museumId: row.museumId,
+      name: row.name,
+      price: Number(row.price),
+      ticketKind: row.ticketKind || 'BASIC',
+      exhibitionId: row.exhibitionId || undefined,
+      audienceType: row.audienceType || 'GENERAL',
+      tagline: row.tagline || '',
+      audience: row.audience || '',
+      description: row.description || '',
+      benefits: row.benefits || '',
+      rules: row.rules || '',
+      status: nextStatus,
+      sort: row.sort,
+    })
+    ElMessage.success(nextStatus === 1 ? '已启用该票种' : '已停用该票种')
+    load()
+  } catch {
+    // 错误已提示
   }
 }
 
@@ -196,7 +225,7 @@ onMounted(async () => {
     <PageHeader
       eyebrow="TICKET TYPES"
       title="票种管理"
-      desc="配置基础入馆票、单展票与全馆联票；单展票和联票可按成人、学生、亲子设置不同价格。"
+      desc="配置基础入馆票、单展票与全馆联票。停用后记录保留并显示为停用；删除后不再展示。博物馆停用期间不能新增票种，展览停用期间不能新增或启用单展票。"
     >
       <el-button type="primary" @click="openCreate">
         <el-icon><Plus /></el-icon>
@@ -256,9 +285,12 @@ onMounted(async () => {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="140" fixed="right">
+        <el-table-column label="操作" width="190" fixed="right">
           <template #default="{ row }">
             <el-button text size="small" @click="openEdit(row)">编辑</el-button>
+            <el-button text size="small" @click="toggleStatus(row)">
+              {{ row.status === 1 ? '停用' : '启用' }}
+            </el-button>
             <el-button text size="small" type="danger" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -280,7 +312,13 @@ onMounted(async () => {
         <div class="form-cols">
           <el-form-item label="所属博物馆" prop="museumId">
             <el-select v-model="form.museumId" placeholder="请选择" style="width: 100%" @change="onMuseumChange">
-              <el-option v-for="museum in museums" :key="museum.id" :label="museum.name" :value="museum.id" />
+              <el-option
+                v-for="museum in museums"
+                :key="museum.id"
+                :label="museum.status === 1 ? museum.name : `${museum.name}（已停用）`"
+                :value="museum.id"
+                :disabled="museum.status !== 1"
+              />
             </el-select>
           </el-form-item>
           <el-form-item label="状态">
@@ -309,8 +347,9 @@ onMounted(async () => {
               <el-option
                 v-for="exhibition in exhibitions"
                 :key="exhibition.id"
-                :label="exhibition.name"
+                :label="exhibition.status === 1 ? exhibition.name : `${exhibition.name}（已停用）`"
                 :value="exhibition.id"
+                :disabled="exhibition.status !== 1"
               />
             </el-select>
           </el-form-item>

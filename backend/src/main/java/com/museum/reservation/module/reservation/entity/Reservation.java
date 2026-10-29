@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Data
@@ -22,6 +23,7 @@ public class Reservation {
     private Long museumId;
     private Long exhibitionId;
     private Long slotId;
+    private LocalDate visitDate;
     private Long ticketTypeId;
     private Integer visitorCount;
     private BigDecimal unitPrice;

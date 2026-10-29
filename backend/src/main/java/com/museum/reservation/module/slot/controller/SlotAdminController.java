@@ -3,6 +3,7 @@ package com.museum.reservation.module.slot.controller;
 import com.museum.reservation.common.ApiResponse;
 import com.museum.reservation.common.PageResult;
 import com.museum.reservation.common.log.OpLog;
+import com.museum.reservation.module.slot.dto.SlotBatchSaveRequest;
 import com.museum.reservation.module.slot.dto.SlotSaveRequest;
 import com.museum.reservation.module.slot.service.SlotService;
 import com.museum.reservation.module.slot.vo.SlotVO;
@@ -23,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
 
-@Tag(name = "时段与票额管理")
+@Tag(name = "入馆批次与票额管理")
 @RestController
 @RequestMapping("/api/admin/slots")
 @RequiredArgsConstructor
@@ -49,19 +50,25 @@ public class SlotAdminController {
     }
 
     @PostMapping
-    @OpLog(module = "时段管理", operation = "新增参观时段")
+    @OpLog(module = "入馆批次管理", operation = "新增入馆批次")
     public ApiResponse<SlotVO> create(@Valid @RequestBody SlotSaveRequest request) {
         return ApiResponse.ok(slotService.create(request));
     }
 
+    @PostMapping("/batch")
+    @OpLog(module = "入馆批次管理", operation = "批量新增入馆批次")
+    public ApiResponse<Integer> createBatch(@Valid @RequestBody SlotBatchSaveRequest request) {
+        return ApiResponse.ok(slotService.createBatch(request));
+    }
+
     @PutMapping("/{id}")
-    @OpLog(module = "时段管理", operation = "修改参观时段")
+    @OpLog(module = "入馆批次管理", operation = "修改入馆批次")
     public ApiResponse<SlotVO> update(@PathVariable Long id, @Valid @RequestBody SlotSaveRequest request) {
         return ApiResponse.ok(slotService.update(id, request));
     }
 
     @DeleteMapping("/{id}")
-    @OpLog(module = "时段管理", operation = "删除参观时段")
+    @OpLog(module = "入馆批次管理", operation = "删除入馆批次")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         slotService.delete(id);
         return ApiResponse.ok();

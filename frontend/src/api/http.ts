@@ -39,9 +39,12 @@ instance.interceptors.response.use(
       ElMessage.error('登录状态已失效，请重新登录')
     } else if (status === 403) {
       ElMessage.error('没有权限执行该操作')
-    } else if (!error?.response) {
+    } else if (!error?.response || status === 502 || status === 503 || status === 504) {
       // 后端未启动、端口不通或跨域被拦截时走这里，明确提示而不是笼统的“网络异常”
       ElMessage.error('无法连接服务器，请确认后端服务（http://localhost:8080）已启动')
+    } else if (status >= 500 && !error?.response?.data?.message) {
+      // Vite 代理在后端未启动时通常返回 500，这里给出可排查的提示
+      ElMessage.error('后端服务暂时不可用，请确认后端已启动后重试')
     } else {
       ElMessage.error(error?.response?.data?.message || '请求失败，请稍后重试')
     }

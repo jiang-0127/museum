@@ -5,6 +5,8 @@ import com.museum.reservation.common.Constants;
 import com.museum.reservation.common.qr.QrTokenService;
 import com.museum.reservation.module.payment.entity.PaymentOrder;
 import com.museum.reservation.module.payment.mapper.PaymentOrderMapper;
+import com.museum.reservation.module.museum.entity.Museum;
+import com.museum.reservation.module.museum.mapper.MuseumMapper;
 import com.museum.reservation.module.reservation.entity.Reservation;
 import com.museum.reservation.module.reservation.mapper.ReservationMapper;
 import com.museum.reservation.module.reservation.service.ReservationService;
@@ -16,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneId;
 
 @Service
@@ -25,6 +28,7 @@ public class PaymentService {
     private final PaymentOrderMapper paymentOrderMapper;
     private final ReservationMapper reservationMapper;
     private final VisitSlotMapper slotMapper;
+    private final MuseumMapper museumMapper;
     private final ReservationService reservationService;
     private final QrTokenService qrTokenService;
 
@@ -54,11 +58,19 @@ public class PaymentService {
             throw new BusinessException("订单已超过支付时限，请重新预约");
         }
 
-        VisitSlot slot = slotMapper.selectById(reservation.getSlotId());
-        if (slot == null) {
-            throw new BusinessException("参观时段不存在");
+        LocalDateTime expireAt;
+        if (reservation.getSlotId() == null) {
+            Museum museum = museumMapper.selectById(reservation.getMuseumId());
+            LocalTime close = museum == null ? LocalTime.of(17, 0)
+                    : parseTime(museum.getCloseTime(), LocalTime.of(17, 0));
+            expireAt = reservation.getVisitDate().atTime(close);
+        } else {
+            VisitSlot slot = slotMapper.selectById(reservation.getSlotId());
+            if (slot == null) {
+                throw new BusinessException("参观时段不存在");
+            }
+            expireAt = slot.getVisitDate().atTime(slot.getEndTime()).plusMinutes(30);
         }
-        LocalDateTime expireAt = slot.getVisitDate().atTime(slot.getEndTime()).plusMinutes(30);
         String token = qrTokenService.generate(reservation.getOrderNo(),
                 expireAt.atZone(ZoneId.systemDefault()).toInstant());
 
@@ -72,6 +84,17 @@ public class PaymentService {
         reservationMapper.updateById(reservation);
 
         return reservationService.getDetailInternal(reservation.getId(), userId, false);
+    }
+
+    private LocalTime parseTime(String value, LocalTime fallback) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        try {
+            return LocalTime.parse(value.trim());
+        } catch (Exception e) {
+            return fallback;
+        }
     }
 
     public PaymentOrder getByOrderNo(String orderNo) {

@@ -1,5 +1,5 @@
 import { get } from './http'
-import type { Exhibition, Museum, Notice, PageResult, SiteSummary, Slot, TicketType } from '@/types'
+import type { BasicQuota, Exhibition, Museum, Notice, PageResult, SiteSummary, Slot, TicketType } from '@/types'
 
 export const getSiteSummary = () => get<SiteSummary>('/site/summary')
 
@@ -13,6 +13,9 @@ export const getMuseumExhibitions = (id: number | string) =>
 
 export const getMuseumTicketTypes = (id: number | string) =>
   get<TicketType[]>(`/museums/${id}/ticket-types`)
+
+export const getBasicQuota = (id: number | string, date: string) =>
+  get<BasicQuota>(`/museums/${id}/basic-quota`, { date })
 
 export const getExhibitions = (params?: Record<string, unknown>) =>
   get<PageResult<Exhibition>>('/exhibitions', params)

@@ -22,6 +22,7 @@ public final class Constants {
 
     public static final int STATUS_ENABLED = 1;
     public static final int STATUS_DISABLED = 0;
+    public static final int STATUS_DELETED = 2;
 
     public static final String TICKET_PREFIX = "MUSEUM-TICKET:";
     public static final String LOG_SUCCESS = "SUCCESS";

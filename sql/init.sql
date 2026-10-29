@@ -75,9 +75,11 @@ CREATE TABLE museum (
     description TEXT,
     open_time   VARCHAR(50)  DEFAULT '09:00',
     close_time  VARCHAR(50)  DEFAULT '17:00',
+    closed_days VARCHAR(20)  DEFAULT NULL COMMENT 'weekly closed weekdays, 1=Mon..7=Sun',
+    daily_capacity INT       NOT NULL DEFAULT 1200,
     phone       VARCHAR(50),
     cover_url   VARCHAR(500),
-    status      TINYINT      NOT NULL DEFAULT 1,
+    status      TINYINT      NOT NULL DEFAULT 1 COMMENT '0停用/1启用/2已删除',
     sort        INT          NOT NULL DEFAULT 0,
     created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -92,7 +94,7 @@ CREATE TABLE exhibition (
     cover_url   VARCHAR(500),
     start_date  DATE         NOT NULL,
     end_date    DATE         NOT NULL,
-    status      TINYINT      NOT NULL DEFAULT 1,
+    status      TINYINT      NOT NULL DEFAULT 1 COMMENT '0停用/1启用/2已删除',
     created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     KEY idx_exhibition_museum (museum_id),
@@ -113,7 +115,7 @@ CREATE TABLE ticket_type (
     description  VARCHAR(255),
     benefits     VARCHAR(800),
     rules        VARCHAR(800),
-    status       TINYINT       NOT NULL DEFAULT 1,
+    status       TINYINT       NOT NULL DEFAULT 1 COMMENT '0停用/1启用/2已删除',
     sort         INT           NOT NULL DEFAULT 0,
     created_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -133,7 +135,7 @@ CREATE TABLE visit_slot (
     end_time       TIME   NOT NULL,
     total_capacity INT    NOT NULL DEFAULT 200,
     booked_count   INT    NOT NULL DEFAULT 0,
-    status         TINYINT NOT NULL DEFAULT 1,
+    status         TINYINT NOT NULL DEFAULT 1 COMMENT '0停用/1启用/2已删除',
     created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_slot_museum_date_time (museum_id, visit_date, start_time),
@@ -153,7 +155,8 @@ CREATE TABLE reservation (
     user_id         BIGINT        NOT NULL,
     museum_id       BIGINT        NOT NULL,
     exhibition_id   BIGINT,
-    slot_id         BIGINT        NOT NULL,
+    slot_id         BIGINT,
+    visit_date      DATE,
     ticket_type_id  BIGINT        NOT NULL,
     visitor_count   INT           NOT NULL,
     unit_price      DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
@@ -171,6 +174,7 @@ CREATE TABLE reservation (
     UNIQUE KEY uk_reservation_order (order_no),
     KEY idx_reservation_user (user_id, status),
     KEY idx_reservation_slot (slot_id, status),
+    KEY idx_reservation_visit (museum_id, visit_date),
     KEY idx_reservation_created (created_at),
     CONSTRAINT fk_reservation_user FOREIGN KEY (user_id) REFERENCES sys_user (id),
     CONSTRAINT fk_reservation_museum FOREIGN KEY (museum_id) REFERENCES museum (id),
@@ -184,7 +188,7 @@ CREATE TABLE reservation (
 CREATE TABLE visitor (
     id             BIGINT PRIMARY KEY AUTO_INCREMENT,
     reservation_id BIGINT      NOT NULL,
-    slot_id        BIGINT      NOT NULL,
+    slot_id        BIGINT,
     name           VARCHAR(50) NOT NULL,
     id_card        VARCHAR(18) NOT NULL,
     phone          VARCHAR(20),
@@ -306,18 +310,18 @@ INSERT INTO sys_user_role (user_id, role_id) VALUES
 UPDATE sys_user SET created_at = DATE_SUB(CURDATE(), INTERVAL 7 DAY),
                     updated_at = DATE_SUB(CURDATE(), INTERVAL 7 DAY);
 
-INSERT INTO museum (id, name, address, description, open_time, close_time, phone, cover_url, status, sort) VALUES
+INSERT INTO museum (id, name, address, description, open_time, close_time, closed_days, daily_capacity, phone, cover_url, status, sort) VALUES
 (1, '故宫博物院', '北京市东城区景山前街4号',
  '红墙黄瓦之间，六百年宫城在光影中徐徐展开。故宫博物院以明清宫廷建筑、书画、陶瓷与宫廷器物收藏闻名，是理解中华文明连续性的一扇窗口。参观请提前预约，并按预约时段由午门入院。',
- '08:30', '17:00', '010-85007938',
+ '08:30', '17:00', '1', 1200, '010-85007938',
  '/images/seed/museum-1.jpg', 1, 100),
 (2, '上海博物馆', '上海市黄浦区人民大道201号',
  '上海博物馆以中国古代青铜器、陶瓷、书法与绘画收藏著称。建筑取“天圆地方”之意，常设展与特展并行，在人民广场的喧嚣中提供一处安静而深远的观看空间。',
- '09:00', '17:00', '021-63723500',
+ '09:00', '17:00', NULL, 1000, '021-63723500',
  '/images/seed/museum-2.jpg', 1, 90),
 (3, '苏州博物馆', '江苏省苏州市姑苏区东北街204号',
  '粉墙黛瓦、片石假山，贝聿铭以现代几何语言回应苏州园林的传统。苏州博物馆将吴地文人书画、工艺与建筑空间融为一体，是江南文化的一次当代表达。',
- '09:00', '17:00', '0512-67575666',
+ '09:00', '17:00', NULL, 800, '0512-67575666',
  '/images/seed/museum-3.jpg', 1, 80);
 
 INSERT INTO exhibition (id, museum_id, name, description, cover_url, start_date, end_date, status) VALUES
@@ -469,7 +473,7 @@ INSERT INTO ticket_type (id, museum_id, name, price, ticket_kind, exhibition_id,
  '基础入馆\n馆内全部展览\n电子导览手册',
  '亲子票含 1 位成人 + 1 位儿童\n儿童须与成人同时入馆\n超出人数需另购票', 1, 100);
 
--- 未来 14 天、每个博物馆每天 3 个时段
+-- 未来 14 天、每个博物馆每天 3 个时段（自动跳过博物馆每周闭馆日）
 INSERT INTO visit_slot (museum_id, exhibition_id, visit_date, start_time, end_time, total_capacity, booked_count, status)
 SELECT m.id, NULL, DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 7 DAY), INTERVAL d.n DAY),
        t.start_time, t.end_time, t.capacity, 0,
@@ -485,7 +489,13 @@ JOIN (SELECT CAST('09:00:00' AS TIME) AS start_time, CAST('11:00:00' AS TIME) AS
       UNION ALL
       SELECT CAST('13:00:00' AS TIME), CAST('15:00:00' AS TIME), 200
       UNION ALL
-      SELECT CAST('18:00:00' AS TIME), CAST('20:00:00' AS TIME), 150) t;
+      SELECT CAST('15:00:00' AS TIME), CAST('17:00:00' AS TIME), 150) t
+WHERE m.closed_days IS NULL
+   OR m.closed_days = ''
+   OR NOT FIND_IN_SET(
+       WEEKDAY(DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 7 DAY), INTERVAL d.n DAY)) + 1,
+       m.closed_days
+   );
 
 -- ============================================================
 -- 公告、参数
@@ -515,9 +525,9 @@ INSERT INTO system_config (config_key, config_value, description) VALUES
 -- ============================================================
 -- 演示预约数据（便于统计报表与核销记录展示）
 -- ============================================================
-SET @slot_m1_today = (SELECT id FROM visit_slot WHERE museum_id = 1 AND visit_date = CURDATE() AND start_time = '09:00:00' LIMIT 1);
-SET @slot_m2_today = (SELECT id FROM visit_slot WHERE museum_id = 2 AND visit_date = CURDATE() AND start_time = '13:00:00' LIMIT 1);
-SET @slot_m1_tomorrow = (SELECT id FROM visit_slot WHERE museum_id = 1 AND visit_date = DATE_ADD(CURDATE(), INTERVAL 1 DAY) AND start_time = '09:00:00' LIMIT 1);
+SET @slot_m1_today = (SELECT id FROM visit_slot WHERE museum_id = 1 AND visit_date >= CURDATE() AND start_time = '09:00:00' ORDER BY visit_date LIMIT 1);
+SET @slot_m2_today = (SELECT id FROM visit_slot WHERE museum_id = 2 AND visit_date >= CURDATE() AND start_time = '13:00:00' ORDER BY visit_date LIMIT 1);
+SET @slot_m1_tomorrow = (SELECT id FROM visit_slot WHERE museum_id = 1 AND visit_date > CURDATE() AND start_time = '09:00:00' ORDER BY visit_date LIMIT 1);
 
 UPDATE visit_slot SET booked_count = 2 WHERE id = @slot_m1_today;
 UPDATE visit_slot SET booked_count = 1 WHERE id = @slot_m2_today;
@@ -527,7 +537,7 @@ INSERT INTO reservation (id, order_no, user_id, museum_id, exhibition_id, slot_i
                          status, qr_expire_at, checkin_time, created_at)
 VALUES
 (1, 'MRDEMO20260001', 3, 1, NULL, @slot_m1_today, 1, 2, 0.00, 0.00, '林小满', '13900000003',
- 'CHECKED_IN', TIMESTAMP(CURDATE(), '11:30:00'), TIMESTAMP(CURDATE(), '09:18:00'), TIMESTAMP(CURDATE(), '08:20:00')),
+ 'CHECKED_IN', TIMESTAMP(CURDATE(), '11:30:00'), TIMESTAMP(CURDATE(), '09:15:00'), TIMESTAMP(CURDATE(), '08:20:00')),
 (2, 'MRDEMO20260002', 3, 2, NULL, @slot_m2_today, 18, 1, 80.00, 80.00, '林小满', '13900000003',
  'CHECKED_IN', TIMESTAMP(CURDATE(), '15:30:00'), TIMESTAMP(CURDATE(), '13:06:00'), TIMESTAMP(CURDATE(), '12:10:00')),
 (3, 'MRDEMO20260003', 3, 1, NULL, @slot_m1_tomorrow, 8, 1, 60.00, 60.00, '林小满', '13900000003',
@@ -555,11 +565,11 @@ INSERT INTO payment_order (payment_no, order_no, reservation_id, user_id, amount
 UPDATE payment_order SET refund_time = TIMESTAMP(CURDATE(), '08:05:00') WHERE reservation_id = 3;
 
 INSERT INTO checkin_record (reservation_id, order_no, checkin_time, gate, operator_id, operator_name, status) VALUES
-(1, 'MRDEMO20260001', TIMESTAMP(CURDATE(), '09:18:00'), '午门东闸机', 2, '预约管理员', 'SUCCESS'),
+(1, 'MRDEMO20260001', TIMESTAMP(CURDATE(), '09:15:00'), '午门东闸机', 2, '预约管理员', 'SUCCESS'),
 (2, 'MRDEMO20260002', TIMESTAMP(CURDATE(), '13:06:00'), '南门闸机', 2, '预约管理员', 'SUCCESS');
 
 INSERT INTO operation_log (user_id, username, module, operation, method, params, ip, duration_ms, success, create_time) VALUES
-(2, 'manager', '核销', '票码核销', 'CheckinController.verify', '[{"ticketCode":"***"}]', '127.0.0.1', 86, 1, TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 6 DAY), '09:18:00')),
+(2, 'manager', '核销', '票码核销', 'CheckinController.verify', '[{"ticketCode":"***"}]', '127.0.0.1', 86, 1, TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 6 DAY), '09:15:00')),
 (3, 'visitor', '预约', '提交预约', 'ReservationController.create', '[{"slotId":1,"ticketTypeId":1}]', '127.0.0.1', 132, 1, TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 6 DAY), '08:20:00')),
 (1, 'admin', '系统管理', '修改参数配置', 'ConfigAdminController.update', '[{"configValue":"6"}]', '127.0.0.1', 41, 1, DATE_SUB(NOW(), INTERVAL 6 DAY) - INTERVAL 2 HOUR),
 (1, 'admin', '用户管理', '新增用户', 'UserAdminController.create', '[{"username":"visitor"}]', '127.0.0.1', 58, 1, TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 7 DAY), '10:12:00')),
@@ -586,18 +596,18 @@ INSERT INTO reservation (id, order_no, user_id, museum_id, exhibition_id, slot_i
                          visitor_count, unit_price, total_amount, contact_name, contact_phone,
                          status, qr_expire_at, checkin_time, created_at)
 SELECT 13, 'MRDEMO20260004', 3, 1, NULL,
-       (SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 7 DAY) AND start_time='09:00:00' LIMIT 1),
+       (SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date>=DATE_SUB(CURDATE(), INTERVAL 7 DAY) AND start_time='09:00:00' ORDER BY visit_date LIMIT 1),
        1, 2, 0.00, 0.00, '林小满', '13900000003',
        'CHECKED_IN', TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 7 DAY),'11:30:00'), TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 7 DAY),'09:12:00'),
        TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 7 DAY),'08:15:00');
 UPDATE visit_slot SET booked_count = booked_count + 2
-  WHERE id = (SELECT id FROM (SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 7 DAY) AND start_time='09:00:00' LIMIT 1) t);
+  WHERE id = (SELECT id FROM (SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date>=DATE_SUB(CURDATE(), INTERVAL 7 DAY) AND start_time='09:00:00' ORDER BY visit_date LIMIT 1) t);
 INSERT INTO visitor (reservation_id, slot_id, name, id_card, phone) VALUES
-(13, (SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 7 DAY) AND start_time='09:00:00' LIMIT 1), '林小满', '110101199505050033', '13900000003'),
-(13, (SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 7 DAY) AND start_time='09:00:00' LIMIT 1), '周予安', '110101199806060044', '13900000004');
+(13, (SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date>=DATE_SUB(CURDATE(), INTERVAL 7 DAY) AND start_time='09:00:00' ORDER BY visit_date LIMIT 1), '林小满', '110101199505050033', '13900000003'),
+(13, (SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date>=DATE_SUB(CURDATE(), INTERVAL 7 DAY) AND start_time='09:00:00' ORDER BY visit_date LIMIT 1), '周予安', '110101199806060044', '13900000004');
 INSERT INTO slot_guest_lock (slot_id, id_card, reservation_id) VALUES
-((SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 7 DAY) AND start_time='09:00:00' LIMIT 1), '110101199505050033', 13),
-((SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 7 DAY) AND start_time='09:00:00' LIMIT 1), '110101199806060044', 13);
+((SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date>=DATE_SUB(CURDATE(), INTERVAL 7 DAY) AND start_time='09:00:00' ORDER BY visit_date LIMIT 1), '110101199505050033', 13),
+((SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date>=DATE_SUB(CURDATE(), INTERVAL 7 DAY) AND start_time='09:00:00' ORDER BY visit_date LIMIT 1), '110101199806060044', 13);
 INSERT INTO payment_order (payment_no, order_no, reservation_id, user_id, amount, pay_type, status, paid_time) VALUES
 ('PAYDEMO20260004', 'MRDEMO20260004', 13, 3, 0.00, 'FREE', 'PAID', TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 7 DAY),'08:15:30'));
 INSERT INTO checkin_record (reservation_id, order_no, checkin_time, gate, operator_id, operator_name, status) VALUES
@@ -641,17 +651,17 @@ INSERT INTO slot_guest_lock (slot_id, id_card, reservation_id) VALUES
 INSERT INTO payment_order (payment_no, order_no, reservation_id, user_id, amount, pay_type, status, paid_time) VALUES
 ('PAYDEMO20260006', 'MRDEMO20260006', 15, 3, 45.00, 'MOCK', 'PAID', TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 3 DAY),'10:21:00'));
 
--- 预约 7：10/26 故宫 18:00，管理员，已取消
+-- 预约 7：10/26 故宫 15:00，管理员，已取消
 INSERT INTO reservation (id, order_no, user_id, museum_id, exhibition_id, slot_id, ticket_type_id,
                          visitor_count, unit_price, total_amount, contact_name, contact_phone,
                          status, qr_expire_at, checkin_time, created_at)
 SELECT 16, 'MRDEMO20260007', 2, 1, NULL,
-       (SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 1 DAY) AND start_time='18:00:00' LIMIT 1),
+       (SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date>=DATE_SUB(CURDATE(), INTERVAL 1 DAY) AND start_time='15:00:00' ORDER BY visit_date LIMIT 1),
        8, 1, 60.00, 60.00, '预约管理员', '13800000002',
        'CANCELED', TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 1 DAY),'20:30:00'), NULL,
        TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 1 DAY),'15:00:00');
 INSERT INTO visitor (reservation_id, slot_id, name, id_card, phone) VALUES
-(16, (SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 1 DAY) AND start_time='18:00:00' LIMIT 1), '预约管理员', '110101199202020022', '13800000002');
+(16, (SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date>=DATE_SUB(CURDATE(), INTERVAL 1 DAY) AND start_time='15:00:00' ORDER BY visit_date LIMIT 1), '预约管理员', '110101199202020022', '13800000002');
 INSERT INTO payment_order (payment_no, order_no, reservation_id, user_id, amount, pay_type, status, paid_time) VALUES
 ('PAYDEMO20260007', 'MRDEMO20260007', 16, 2, 60.00, 'MOCK', 'REFUNDED', TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 1 DAY),'15:01:00'));
 UPDATE payment_order SET refund_time = TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 1 DAY),'15:30:00') WHERE reservation_id = 16;
@@ -702,23 +712,23 @@ INSERT INTO slot_guest_lock (slot_id, id_card, reservation_id) VALUES
 INSERT INTO payment_order (payment_no, order_no, reservation_id, user_id, amount, pay_type, status, paid_time) VALUES
 ('PAYDEMO20260008', 'MRDEMO20260008', 17, 3, 50.00, 'MOCK', 'PAID', TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 6 DAY),'10:06:00'));
 
--- 预约 9：10/23 苏州 18:00，游客，已核销（2人）
+-- 预约 9：10/23 苏州 15:00，游客，已核销（2人）
 INSERT INTO reservation (id, order_no, user_id, museum_id, exhibition_id, slot_id, ticket_type_id,
                          visitor_count, unit_price, total_amount, contact_name, contact_phone,
                          status, qr_expire_at, checkin_time, created_at)
 SELECT 18, 'MRDEMO20260009', 3, 3, NULL,
-       (SELECT id FROM visit_slot WHERE museum_id=3 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 4 DAY) AND start_time='18:00:00' LIMIT 1),
+       (SELECT id FROM visit_slot WHERE museum_id=3 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 4 DAY) AND start_time='15:00:00' LIMIT 1),
        25, 2, 45.00, 90.00, '林小满', '13900000003',
        'CHECKED_IN', TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 4 DAY),'20:30:00'), TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 4 DAY),'18:08:00'),
        TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 4 DAY),'16:20:00');
 UPDATE visit_slot SET booked_count = booked_count + 2
-  WHERE id = (SELECT id FROM (SELECT id FROM visit_slot WHERE museum_id=3 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 4 DAY) AND start_time='18:00:00' LIMIT 1) t);
+  WHERE id = (SELECT id FROM (SELECT id FROM visit_slot WHERE museum_id=3 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 4 DAY) AND start_time='15:00:00' LIMIT 1) t);
 INSERT INTO visitor (reservation_id, slot_id, name, id_card, phone) VALUES
-(18, (SELECT id FROM visit_slot WHERE museum_id=3 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 4 DAY) AND start_time='18:00:00' LIMIT 1), '林小满', '110101199505050033', '13900000003'),
-(18, (SELECT id FROM visit_slot WHERE museum_id=3 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 4 DAY) AND start_time='18:00:00' LIMIT 1), '周予安', '110101199806060044', '13900000004');
+(18, (SELECT id FROM visit_slot WHERE museum_id=3 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 4 DAY) AND start_time='15:00:00' LIMIT 1), '林小满', '110101199505050033', '13900000003'),
+(18, (SELECT id FROM visit_slot WHERE museum_id=3 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 4 DAY) AND start_time='15:00:00' LIMIT 1), '周予安', '110101199806060044', '13900000004');
 INSERT INTO slot_guest_lock (slot_id, id_card, reservation_id) VALUES
-((SELECT id FROM visit_slot WHERE museum_id=3 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 4 DAY) AND start_time='18:00:00' LIMIT 1), '110101199505050033', 18),
-((SELECT id FROM visit_slot WHERE museum_id=3 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 4 DAY) AND start_time='18:00:00' LIMIT 1), '110101199806060044', 18);
+((SELECT id FROM visit_slot WHERE museum_id=3 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 4 DAY) AND start_time='15:00:00' LIMIT 1), '110101199505050033', 18),
+((SELECT id FROM visit_slot WHERE museum_id=3 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 4 DAY) AND start_time='15:00:00' LIMIT 1), '110101199806060044', 18);
 INSERT INTO payment_order (payment_no, order_no, reservation_id, user_id, amount, pay_type, status, paid_time) VALUES
 ('PAYDEMO20260009', 'MRDEMO20260009', 18, 3, 90.00, 'MOCK', 'PAID', TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 4 DAY),'16:21:00'));
 INSERT INTO checkin_record (reservation_id, order_no, checkin_time, gate, operator_id, operator_name, status) VALUES
@@ -729,32 +739,32 @@ INSERT INTO reservation (id, order_no, user_id, museum_id, exhibition_id, slot_i
                          visitor_count, unit_price, total_amount, contact_name, contact_phone,
                          status, qr_expire_at, checkin_time, created_at)
 SELECT 19, 'MRDEMO20260010', 3, 1, NULL,
-       (SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 2 DAY) AND start_time='09:00:00' LIMIT 1),
+       (SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date>=DATE_SUB(CURDATE(), INTERVAL 2 DAY) AND start_time='09:00:00' ORDER BY visit_date LIMIT 1),
        2, 1, 40.00, 40.00, '林小满', '13900000003',
        'CANCELED', TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 2 DAY),'11:30:00'), NULL,
        TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 2 DAY),'08:50:00');
 INSERT INTO visitor (reservation_id, slot_id, name, id_card, phone) VALUES
-(19, (SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date=DATE_SUB(CURDATE(), INTERVAL 2 DAY) AND start_time='09:00:00' LIMIT 1), '林小满', '110101199505050033', '13900000003');
+(19, (SELECT id FROM visit_slot WHERE museum_id=1 AND visit_date>=DATE_SUB(CURDATE(), INTERVAL 2 DAY) AND start_time='09:00:00' ORDER BY visit_date LIMIT 1), '林小满', '110101199505050033', '13900000003');
 INSERT INTO payment_order (payment_no, order_no, reservation_id, user_id, amount, pay_type, status, paid_time) VALUES
 ('PAYDEMO20260010', 'MRDEMO20260010', 19, 3, 40.00, 'MOCK', 'REFUNDED', TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 2 DAY),'08:51:00'));
 UPDATE payment_order SET refund_time = TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 2 DAY),'09:00:00') WHERE reservation_id = 19;
 UPDATE reservation SET cancel_time = TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 2 DAY),'09:00:00') WHERE id = 19;
 
--- 预约 11：10/27 上海 18:00，游客，已预约
+-- 预约 11：10/27 上海 15:00，游客，已预约
 INSERT INTO reservation (id, order_no, user_id, museum_id, exhibition_id, slot_id, ticket_type_id,
                          visitor_count, unit_price, total_amount, contact_name, contact_phone,
                          status, qr_expire_at, checkin_time, created_at)
 SELECT 20, 'MRDEMO20260011', 3, 2, NULL,
-       (SELECT id FROM visit_slot WHERE museum_id=2 AND visit_date=CURDATE() AND start_time='18:00:00' LIMIT 1),
+       (SELECT id FROM visit_slot WHERE museum_id=2 AND visit_date=CURDATE() AND start_time='15:00:00' LIMIT 1),
        18, 1, 80.00, 80.00, '林小满', '13900000003',
        'RESERVED', TIMESTAMP(CURDATE(),'20:30:00'), NULL,
        TIMESTAMP(CURDATE(),'17:10:00');
 UPDATE visit_slot SET booked_count = booked_count + 1
-  WHERE id = (SELECT id FROM (SELECT id FROM visit_slot WHERE museum_id=2 AND visit_date=CURDATE() AND start_time='18:00:00' LIMIT 1) t);
+  WHERE id = (SELECT id FROM (SELECT id FROM visit_slot WHERE museum_id=2 AND visit_date=CURDATE() AND start_time='15:00:00' LIMIT 1) t);
 INSERT INTO visitor (reservation_id, slot_id, name, id_card, phone) VALUES
-(20, (SELECT id FROM visit_slot WHERE museum_id=2 AND visit_date=CURDATE() AND start_time='18:00:00' LIMIT 1), '林小满', '110101199505050033', '13900000003');
+(20, (SELECT id FROM visit_slot WHERE museum_id=2 AND visit_date=CURDATE() AND start_time='15:00:00' LIMIT 1), '林小满', '110101199505050033', '13900000003');
 INSERT INTO slot_guest_lock (slot_id, id_card, reservation_id) VALUES
-((SELECT id FROM visit_slot WHERE museum_id=2 AND visit_date=CURDATE() AND start_time='18:00:00' LIMIT 1), '110101199505050033', 20);
+((SELECT id FROM visit_slot WHERE museum_id=2 AND visit_date=CURDATE() AND start_time='15:00:00' LIMIT 1), '110101199505050033', 20);
 INSERT INTO payment_order (payment_no, order_no, reservation_id, user_id, amount, pay_type, status, paid_time) VALUES
 ('PAYDEMO20260011', 'MRDEMO20260011', 20, 3, 80.00, 'MOCK', 'PAID', TIMESTAMP(CURDATE(),'17:11:00'));
 

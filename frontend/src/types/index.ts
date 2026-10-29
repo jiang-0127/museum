@@ -47,6 +47,8 @@ export interface Museum {
   description?: string
   openTime?: string
   closeTime?: string
+  closedDays?: string | null
+  dailyCapacity?: number
   phone?: string
   coverUrl?: string
   status: number
@@ -84,8 +86,20 @@ export interface TicketType {
   sort: number
 }
 
-export interface Slot {
-  id: number
+export interface BasicQuota {
+  museumId: number
+  visitDate: string
+  dailyCapacity: number
+  slotCapacitySum: number
+  slotCount: number
+  basicQuota: number
+  basicOrderCount: number
+  basicBooked: number
+  basicRemaining: number
+  closed: boolean
+}
+
+export interface Slot {  id: number
   museumId: number
   museumName: string
   exhibitionId?: number
@@ -119,10 +133,10 @@ export interface Reservation {
   museumName: string
   exhibitionId?: number
   exhibitionName?: string
-  slotId: number
+  slotId?: number | null
   visitDate: string
-  startTime: string
-  endTime: string
+  startTime?: string | null
+  endTime?: string | null
   ticketTypeId: number
   ticketTypeName: string
   visitorCount: number
@@ -155,8 +169,8 @@ export interface Ticket {
   museumName: string
   exhibitionName?: string
   visitDate: string
-  startTime: string
-  endTime: string
+  startTime?: string | null
+  endTime?: string | null
   visitorCount: number
   contactName: string
   ticketCode: string
@@ -277,7 +291,8 @@ export interface SiteSummary {
 }
 
 export interface ReservationCreatePayload {
-  slotId: number
+  slotId?: number
+  visitDate?: string
   ticketTypeId: number
   contactName: string
   contactPhone: string

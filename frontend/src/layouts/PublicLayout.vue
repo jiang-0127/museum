@@ -129,9 +129,9 @@ const year = new Date().getFullYear()
           <router-link to="/register">注册账号</router-link>
         </div>
         <div class="footer-col">
-          <h4>开放时间</h4>
-          <p>周二至周日 09:00 - 17:00</p>
-          <p>周一闭馆（法定节假日除外）</p>
+          <h4>预约提示</h4>
+          <p>各馆开放时间以场馆详情为准</p>
+          <p>每周闭馆日以场馆详情为准</p>
           <p class="footer-note">建议提前 1-7 天预约</p>
         </div>
       </div>

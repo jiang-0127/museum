@@ -12,6 +12,7 @@ import {
   getSiteSummary,
 } from '@/api/public'
 import type { Exhibition, Museum, Notice, SiteSummary } from '@/types'
+import { isClosedOn } from '@/utils/schedule'
 
 const router = useRouter()
 const museums = ref<Museum[]>([])
@@ -31,6 +32,31 @@ const museumSectionTitle = computed(() =>
   museumCount.value > 0 ? `${museumCount.value} 座馆，各有观看方式` : '选择一座馆，开始观看',
 )
 
+function timeToMinutes(value: string) {
+  const [hour, minute] = value.split(':').map(Number)
+  return hour * 60 + (minute || 0)
+}
+
+function minutesToTime(value: number) {
+  return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`
+}
+
+const visitTimeRange = computed(() => {
+  const opens = museums.value
+    .map((museum) => museum.openTime)
+    .filter(Boolean)
+    .map((value) => timeToMinutes(value as string))
+  const closes = museums.value
+    .map((museum) => museum.closeTime)
+    .filter(Boolean)
+    .map((value) => timeToMinutes(value as string))
+  if (!opens.length || !closes.length) return null
+  return {
+    open: minutesToTime(Math.min(...opens)),
+    close: minutesToTime(Math.max(...closes)),
+  }
+})
+
 const quick = reactive({
   museumId: undefined as number | undefined,
   date: dayjs().format('YYYY-MM-DD'),
@@ -38,10 +64,14 @@ const quick = reactive({
 
 const disabledDate = (date: Date) => {
   const day = dayjs(date)
-  return (
+  if (
     day.isBefore(dayjs().startOf('day')) ||
     day.isAfter(dayjs().add(advanceDays.value - 1, 'day').endOf('day'))
-  )
+  ) {
+    return true
+  }
+  const museum = museums.value.find((item) => item.id === quick.museumId)
+  return isClosedOn(museum?.closedDays, day.format('YYYY-MM-DD'))
 }
 
 const steps = computed(() => [
@@ -305,9 +335,12 @@ onMounted(load)
               <li><span>04</span>如行程变化，请在时段开始前取消预约</li>
             </ul>
             <div class="visit-time">
-              <span>开放时间</span>
-              <strong class="serif">09:00 — 17:00</strong>
-              <small>周一闭馆，法定节假日除外</small>
+              <span>各馆开放时间</span>
+              <strong v-if="visitTimeRange" class="serif">
+                {{ visitTimeRange.open }} — {{ visitTimeRange.close }}
+              </strong>
+              <strong v-else class="serif">以场馆详情为准</strong>
+              <small>不同场馆时间不同，具体场次与闭馆安排请以场馆详情和公告为准</small>
             </div>
           </div>
         </div>

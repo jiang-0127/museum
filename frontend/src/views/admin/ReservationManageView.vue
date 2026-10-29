@@ -209,7 +209,7 @@ onMounted(async () => {
           <div class="detail-section">
             <h4>参观信息</h4>
             <div class="detail-row"><span>参观日期</span><strong>{{ detail.visitDate }}（{{ ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][dayjs(detail.visitDate).day()] }}）</strong></div>
-            <div class="detail-row"><span>入场时段</span><strong>{{ detail.startTime.slice(0, 5) }} - {{ detail.endTime.slice(0, 5) }}</strong></div>
+            <div class="detail-row"><span>入场方式</span><strong>{{ detail.startTime && detail.endTime ? `${detail.startTime.slice(0, 5)} - ${detail.endTime.slice(0, 5)}` : '开放时间内任意时间' }}</strong></div>
             <div class="detail-row"><span>展览</span><strong>{{ detail.exhibitionName || '常设展' }}</strong></div>
             <div class="detail-row"><span>票种</span><strong>{{ detail.ticketTypeName }}</strong></div>
             <div class="detail-row"><span>金额</span><strong>{{ Number(detail.totalAmount) === 0 ? '免费' : `¥${Number(detail.totalAmount).toFixed(2)}` }}</strong></div>

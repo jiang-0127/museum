@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import {
+  getBasicQuota,
   getMuseum,
   getMuseumExhibitions,
   getMuseumTicketTypes,
@@ -12,7 +13,8 @@ import {
 } from '@/api/public'
 import { useAuthStore } from '@/stores/auth'
 import { audienceLabels, groupPriceRange, groupTickets, ticketAudience, type TicketGroup } from '@/utils/ticket'
-import type { Exhibition, Museum, Slot, TicketType } from '@/types'
+import { formatClosedDays, isClosedOn } from '@/utils/schedule'
+import type { BasicQuota, Exhibition, Museum, Slot, TicketType } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -26,12 +28,47 @@ const selectedDate = ref('')
 const selectedSlotId = ref<number | null>(null)
 const loading = ref(true)
 const maxVisitors = ref(6)
+const advanceDays = ref(14)
 const now = ref(dayjs())
 let clockTimer: number | undefined
 
+const basicTicket = computed(() =>
+  tickets.value.find((ticket) => (ticket.ticketKind || 'BASIC') === 'BASIC'),
+)
+
 const dateOptions = computed(() => {
-  const dates = Array.from(new Set(slots.value.map((slot) => slot.visitDate)))
-  return dates.sort()
+  const dates = new Set(slots.value.map((slot) => slot.visitDate))
+  if (basicTicket.value) {
+    const total = Math.max(1, advanceDays.value)
+    for (let i = 0; i < total; i += 1) {
+      dates.add(dayjs().add(i, 'day').format('YYYY-MM-DD'))
+    }
+  }
+  const closedDays = museum.value?.closedDays
+  return Array.from(dates)
+    .filter((date) => !isClosedOn(closedDays, date))
+    .sort()
+})
+
+const basicQuotaInfo = ref<BasicQuota | null>(null)
+
+async function loadBasicQuota() {
+  if (!museum.value || !selectedDate.value) {
+    basicQuotaInfo.value = null
+    return
+  }
+  try {
+    basicQuotaInfo.value = await getBasicQuota(museum.value.id, selectedDate.value)
+  } catch {
+    basicQuotaInfo.value = null
+  }
+}
+
+const basicQuota = computed(() => basicQuotaInfo.value?.basicQuota ?? 0)
+const basicRemaining = computed(() => basicQuotaInfo.value?.basicRemaining ?? 0)
+
+watch(selectedDate, () => {
+  loadBasicQuota()
 })
 
 const slotsOfDate = computed(() =>
@@ -128,6 +165,7 @@ async function load() {
     exhibitions.value = exhibitionData
     tickets.value = ticketData
     maxVisitors.value = summary.maxVisitorsPerOrder || 6
+    advanceDays.value = summary.advanceBookingDays || 14
     slots.value = slotData.sort((a, b) =>
       `${a.visitDate}${a.startTime}`.localeCompare(`${b.visitDate}${b.startTime}`),
     )
@@ -137,6 +175,7 @@ async function load() {
     } else {
       selectedDate.value = dateOptions.value[0] || ''
     }
+    await loadBasicQuota()
     const firstAvailable = slots.value.find(
       (slot) => slot.visitDate === selectedDate.value && isSlotSelectable(slot),
     )
@@ -161,6 +200,10 @@ function book() {
     ElMessage.info('请先选择一个参观时段')
     return
   }
+  if (museum.value && isClosedOn(museum.value.closedDays, selectedSlot.value.visitDate)) {
+    ElMessage.warning('该日期为博物馆闭馆日，暂不可预约')
+    return
+  }
   const phase = slotPhase(selectedSlot.value)
   if (!phase.bookable) {
     ElMessage.warning(`该时段${phase.label}，暂无法预约`)
@@ -171,6 +214,27 @@ function book() {
     return
   }
   const target = `/booking?slotId=${selectedSlot.value.id}`
+  if (!auth.isLoggedIn) {
+    router.push({ path: '/login', query: { redirect: target } })
+    return
+  }
+  router.push(target)
+}
+
+function bookBasic() {
+  if (!museum.value || !basicTicket.value || !selectedDate.value) {
+    ElMessage.info('请先选择参观日期')
+    return
+  }
+  if (basicQuotaInfo.value?.closed || isClosedOn(museum.value.closedDays, selectedDate.value)) {
+    ElMessage.warning('该日期为博物馆闭馆日，暂不可预约')
+    return
+  }
+  if (basicRemaining.value <= 0) {
+    ElMessage.warning('该日期普通预约票已约满，请选择其他日期')
+    return
+  }
+  const target = `/booking?museumId=${museum.value.id}&date=${selectedDate.value}&ticketTypeId=${basicTicket.value.id}`
   if (!auth.isLoggedIn) {
     router.push({ path: '/login', query: { redirect: target } })
     return
@@ -218,8 +282,12 @@ onUnmounted(() => {
           <p class="about-text">{{ museum.description }}</p>
           <div class="about-facts">
             <div>
-              <span>开放时间</span>
+              <span>场馆开放时间</span>
               <strong>{{ museum.openTime }} - {{ museum.closeTime }}</strong>
+            </div>
+            <div v-if="museum.closedDays">
+              <span>每周闭馆日</span>
+              <strong>{{ formatClosedDays(museum.closedDays) }}</strong>
             </div>
             <div>
               <span>票种</span>
@@ -291,8 +359,8 @@ onUnmounted(() => {
           <div>
             <strong>参观提示</strong>
             <p>
-              请按预约时段到馆，携带与预约信息一致的有效身份证件。电子票仅在参观当天有效，入场时请出示电子票并核验票码。
-              如行程有变，请在参观时段开始前取消预约。
+              请按预约日期与入馆批次到馆，普通预约票可在开放时间内任意时间入馆，携带与预约信息一致的有效身份证件。
+              电子票仅在参观当天有效，入场时请出示电子票并核验票码。如行程有变，请在参观开始前取消预约。
             </p>
           </div>
         </section>
@@ -302,7 +370,7 @@ onUnmounted(() => {
         <div class="panel-head">
           <span class="eyebrow light">RESERVE A VISIT</span>
           <h2 class="serif">预约参观</h2>
-          <p>选择日期与时段，查看实时余票</p>
+          <p>选择日期与入馆批次，或直接预约普通票</p>
         </div>
 
         <div v-if="loading" class="panel-loading">
@@ -368,6 +436,23 @@ onUnmounted(() => {
               </p>
             </div>
             <el-empty v-else description="该日期暂无可预约时段" :image-size="64" />
+          </div>
+
+          <div v-if="basicTicket" class="basic-book">
+            <div class="basic-book-head">
+              <div>
+                <strong>普通预约票 · 免选批次</strong>
+                <small>开放时间内任意时间入馆，仅需选择参观日期</small>
+              </div>
+              <span class="basic-quota">本日额度 {{ basicQuota }} 张 · 余 {{ basicRemaining }} 张</span>
+            </div>
+            <el-button
+              class="basic-btn"
+              :disabled="basicRemaining <= 0"
+              @click="bookBasic"
+            >
+              {{ basicRemaining <= 0 ? '本日普通票已约满' : '预约普通票' }}
+            </el-button>
           </div>
 
           <div class="panel-summary">
@@ -983,6 +1068,56 @@ onUnmounted(() => {
 
 .slot-item.soldout .slot-left {
   color: rgba(255, 255, 255, 0.5);
+}
+
+.basic-book {
+  margin: 4px 22px 0;
+  padding: 14px;
+  border: 1px solid rgba(240, 198, 116, 0.3);
+  border-radius: 10px;
+  background: rgba(176, 138, 79, 0.12);
+}
+
+.basic-book-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.basic-book-head strong {
+  display: block;
+  color: #f0d9a8;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.basic-book-head small {
+  display: block;
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+
+.basic-quota {
+  color: var(--gold-light);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.basic-btn {
+  width: 100%;
+  margin-top: 12px;
+  border-color: rgba(240, 198, 116, 0.5);
+  background: transparent;
+  color: #f0d9a8;
+}
+
+.basic-btn:hover:not(.is-disabled) {
+  border-color: var(--gold);
+  background: rgba(176, 138, 79, 0.2);
+  color: #fff;
 }
 
 .panel-summary {
