@@ -102,6 +102,17 @@ function isRowClosed(row: Slot) {
   return isClosedOn(museum?.closedDays, row.visitDate)
 }
 
+function hasOpenExhibition(museumId: number | undefined, visitDate: string | undefined) {
+  if (!museumId || !visitDate) return false
+  return exhibitions.value.some(
+    (item) =>
+      item.museumId === museumId &&
+      item.status === 1 &&
+      item.startDate <= visitDate &&
+      item.endDate >= visitDate,
+  )
+}
+
 function rowStatus(row: Slot) {
   if (isRowClosed(row)) return '关闭'
   return slotPhase(row) === 'upcoming' && row.status === 1 ? '开放' : '关闭'
@@ -116,6 +127,9 @@ function statusHint(row: Slot) {
   const phase = slotPhase(row)
   if (phase === 'ended') return '入馆批次已结束，不可修改'
   if (phase === 'ongoing') return '入馆批次正在进行中，不可修改'
+  if (row.status !== 1 && !hasOpenExhibition(row.museumId, row.visitDate)) {
+    return '该日期没有开放中的展览，不能开放此分时批次'
+  }
   return row.status === 1 ? '当前开放预约' : '已关闭，暂不可预约'
 }
 
@@ -302,6 +316,13 @@ async function save() {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
   const targetDate = editingId.value ? form.visitDate : form.dateRange?.[0]
+  if (
+    form.status === 1 &&
+    !hasOpenExhibition(form.museumId, targetDate)
+  ) {
+    ElMessage.warning('该日期没有开放中的展览，分时批次不能开放')
+    return
+  }
   if (selectedMuseum.value && targetDate && isClosedOn(selectedMuseum.value.closedDays, targetDate)) {
     ElMessage.warning('该日期为博物馆每周闭馆日，不能新增或修改分时批次')
     return
@@ -404,6 +425,10 @@ async function toggleStatus(row: Slot) {
         ? '博物馆闭馆日不能修改分时批次状态'
         : '已开始或已结束的分时批次不能修改状态',
     )
+    return
+  }
+  if (row.status !== 1 && !hasOpenExhibition(row.museumId, row.visitDate)) {
+    ElMessage.warning('该日期没有开放中的展览，分时批次不能开放')
     return
   }
   try {
@@ -618,7 +643,7 @@ onMounted(async () => {
               <el-button
                 text
                 size="small"
-                :disabled="!isEditable(row)"
+                :disabled="!isEditable(row) || (row.status !== 1 && !hasOpenExhibition(row.museumId, row.visitDate))"
                 @click="toggleStatus(row)"
               >
                 {{ isRowClosed(row) ? '闭馆' : slotPhase(row) !== 'upcoming' ? '已关闭' : row.status === 1 ? '关闭' : '开放' }}

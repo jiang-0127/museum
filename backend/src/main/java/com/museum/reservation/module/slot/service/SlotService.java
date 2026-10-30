@@ -113,6 +113,10 @@ public class SlotService {
             throw new BusinessException("新增时不能设置为已删除状态");
         }
         validateRequest(request);
+        if (isEnabling(request.getStatus())
+                && !hasOpenExhibition(request.getMuseumId(), request.getVisitDate())) {
+            throw new BusinessException("该日期没有开放中的展览，分时批次不能开放");
+        }
         validateExhibitionPeriod(request.getMuseumId(), request.getVisitDate());
         validateDailyCapacity(request.getMuseumId(), request.getVisitDate(), request.getTotalCapacity(), null);
         if (!request.getVisitDate().atTime(request.getStartTime()).isAfter(LocalDateTime.now())) {
@@ -170,6 +174,10 @@ public class SlotService {
                 continue;
             }
             validateExhibitionPeriod(request.getMuseumId(), date);
+            if (isEnabling(request.getStatus())
+                    && !hasOpenExhibition(request.getMuseumId(), date)) {
+                continue;
+            }
             Long duplicate = slotMapper.selectCount(new LambdaQueryWrapper<VisitSlot>()
                     .eq(VisitSlot::getMuseumId, request.getMuseumId())
                     .isNull(VisitSlot::getExhibitionId)
@@ -203,6 +211,10 @@ public class SlotService {
         VisitSlot slot = slotMapper.selectById(id);
         if (slot == null || (slot.getStatus() != null && slot.getStatus() == Constants.STATUS_DELETED)) {
             throw new BusinessException(404, "入馆批次不存在");
+        }
+        if (isEnabling(request.getStatus())
+                && !hasOpenExhibition(request.getMuseumId(), request.getVisitDate())) {
+            throw new BusinessException("该日期没有开放中的展览，分时批次不能开放");
         }
         if (!slot.getVisitDate().atTime(slot.getStartTime()).isAfter(LocalDateTime.now())) {
             throw new BusinessException("已开始或已结束的分时批次不能修改");
@@ -363,6 +375,18 @@ public class SlotService {
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    private boolean isEnabling(Integer status) {
+        return status == null || status == Constants.STATUS_ENABLED;
+    }
+
+    private boolean hasOpenExhibition(Long museumId, LocalDate visitDate) {
+        return exhibitionMapper.selectCount(new LambdaQueryWrapper<Exhibition>()
+                .eq(Exhibition::getMuseumId, museumId)
+                .eq(Exhibition::getStatus, Constants.STATUS_ENABLED)
+                .le(Exhibition::getStartDate, visitDate)
+                .ge(Exhibition::getEndDate, visitDate)) > 0;
     }
 
     private void validateExhibitionPeriod(Long museumId, LocalDate visitDate) {

@@ -23,4 +23,8 @@ export const updateProfileApi = (data: {
   avatar?: string
 }) => put<User>('/auth/profile', data)
 
-export const logoutApi = () => post<void>('/auth/logout')
+export const logoutApi = (token?: string) =>
+  post<void>('/auth/logout', undefined, {
+    silent: true,
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  })

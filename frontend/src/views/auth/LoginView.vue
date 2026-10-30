@@ -20,17 +20,6 @@ const rules: FormRules = {
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
 }
 
-const demoAccounts = [
-  { label: '游客', username: 'visitor', password: 'Visitor@123' },
-  { label: '预约管理员', username: 'manager', password: 'Manager@123' },
-  { label: '系统管理员', username: 'admin', password: 'Admin@123' },
-]
-
-function fillDemo(account: (typeof demoAccounts)[number]) {
-  form.username = account.username
-  form.password = account.password
-}
-
 async function submit() {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
@@ -108,19 +97,6 @@ async function submit() {
         <div class="register-line">
           还没有账号？
           <router-link to="/register">立即注册</router-link>
-        </div>
-
-        <div class="demo-box">
-          <div class="demo-title">
-            <span>演示账号</span>
-            <small>点击自动填入</small>
-          </div>
-          <div class="demo-list">
-            <button v-for="account in demoAccounts" :key="account.username" @click="fillDemo(account)">
-              <strong>{{ account.label }}</strong>
-              <span>{{ account.username }}</span>
-            </button>
-          </div>
         </div>
 
         <router-link to="/" class="back-home">
@@ -296,60 +272,6 @@ h1 {
 .register-line a {
   color: var(--gold-deep);
   font-weight: 500;
-}
-
-.demo-box {
-  margin-top: 28px;
-  padding: 16px;
-  border: 1px dashed var(--line);
-  border-radius: 12px;
-  background: rgba(255, 253, 249, 0.6);
-}
-
-.demo-title {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 10px;
-  color: var(--text-soft);
-  font-size: 11px;
-}
-
-.demo-title small {
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.demo-list {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-}
-
-.demo-list button {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 9px 8px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #fffdf9;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.demo-list button:hover {
-  border-color: var(--gold-light);
-  background: var(--paper-light);
-}
-
-.demo-list strong {
-  color: var(--text);
-  font-size: 11px;
-}
-
-.demo-list span {
-  color: var(--muted);
-  font-size: 9px;
 }
 
 .back-home {

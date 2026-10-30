@@ -147,8 +147,8 @@ onMounted(async () => {
         <el-table-column prop="museumName" label="博物馆" min-width="130" />
         <el-table-column label="参观时段" width="165">
           <template #default="{ row }">
-            <span class="visit-date">{{ dayjs(row.visitDate).format('YYYY.MM.DD') }}</span>
-            <small>{{ row.startTime.slice(0, 5) }} - {{ row.endTime.slice(0, 5) }}</small>
+            <span class="visit-date">{{ row.visitDate ? dayjs(row.visitDate).format('YYYY.MM.DD') : '—' }}</span>
+            <small>{{ row.startTime && row.endTime ? `${row.startTime.slice(0, 5)} - ${row.endTime.slice(0, 5)}` : '开放时间内任意时间' }}</small>
           </template>
         </el-table-column>
         <el-table-column label="联系人" width="130">

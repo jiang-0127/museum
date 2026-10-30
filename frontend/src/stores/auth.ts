@@ -56,8 +56,10 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function logout(callApi = true) {
-    if (callApi && token.value) {
-      logoutApi().catch(() => undefined)
+    const snapshot = token.value
+    if (callApi && snapshot) {
+      // 先带着当前令牌快照通知后端，再清理本地状态，避免清空后请求变 401 触发红色提示
+      logoutApi(snapshot).catch(() => undefined)
     }
     token.value = ''
     user.value = null
